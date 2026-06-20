@@ -21,7 +21,7 @@ cask "aix-text-editor" do
   desc "LLM-augmented, chunk-based editor for academic papers and reports"
   homepage "https://github.com/kumeS/aixTextEditor"
 
-  depends_on macos: ">= :big_sur"
+  depends_on macos: :big_sur
 
   app "aixTextEditor.app"
 

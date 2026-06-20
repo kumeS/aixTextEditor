@@ -1,28 +1,26 @@
 # Homebrew formula — builds aixTextEditor from source on the user's Mac.
+# A local source build carries no `com.apple.quarantine` flag, so the app opens
+# with no Gatekeeper / notarization prompt, and it targets the host CPU
+# (Apple Silicon or Intel) automatically.
 #
-# This is the RECOMMENDED install path. A local source build carries no
-# `com.apple.quarantine` flag, so the app opens with no Gatekeeper / notarization
-# prompt, and it targets the host CPU (Apple Silicon or Intel) automatically.
+# This formula lives in the app's own public repo (kumeS/aixTextEditor) under
+# Formula/. Two ways to install it:
 #
-# Ship it from a tap repo named `kumeS/homebrew-tap`:
-#     cp Formula/aixtexteditor.rb <homebrew-tap>/Formula/aixtexteditor.rb
-# Users then run:
-#     brew install kumeS/tap/aixtexteditor
+#   A) Single repo — no separate tap repo needed (two commands):
+#        brew tap kumeS/tap https://github.com/kumeS/aixTextEditor
+#        brew install kumeS/tap/aixtexteditor
 #
-# The source must be publicly fetchable for this to work on other machines:
-#   1. Make the GitHub repo public and push a tag (e.g. v1.0.0).
-#   2. Compute the source-tarball sha256:
-#        curl -sL https://github.com/kumeS/aixTextEditor/archive/refs/tags/v1.0.0.tar.gz | shasum -a 256
-#   3. Paste the value into `sha256` below (replacing the placeholder).
+#   B) One command for anyone — needs a tap repo literally named
+#      kumeS/homebrew-tap with this file in its Formula/ dir:
+#        # then: brew install kumeS/tap/aixtexteditor   (no prior `brew tap`)
 #
-# Verified locally: `npm ci` + `npx tauri build` run inside Homebrew's build
-# sandbox (network is permitted there by default) and produce a runnable
-# aixTextEditor.app in ~2 minutes on Apple Silicon.
+# After tagging a new release, refresh `sha256`:
+#   curl -sL https://github.com/kumeS/aixTextEditor/archive/refs/tags/vX.Y.Z.tar.gz | shasum -a 256
 class Aixtexteditor < Formula
   desc "LLM-augmented chunk-based editor for academic papers and reports"
   homepage "https://github.com/kumeS/aixTextEditor"
   url "https://github.com/kumeS/aixTextEditor/archive/refs/tags/v1.0.0.tar.gz"
-  sha256 "REPLACE_WITH_TARBALL_SHA256" # see header: compute after the repo is public
+  sha256 "107d18020b28bb4f89e79136a9382ef074273bdbba3dd27747ddda48ee501810"
   license "Artistic-2.0"
   head "https://github.com/kumeS/aixTextEditor.git", branch: "main"
 

@@ -156,8 +156,14 @@ snapshots, so existing chunk actions operate unchanged.
 ### Install (recommended) — Homebrew
 
 ```bash
+brew tap kumeS/tap https://github.com/kumeS/aixTextEditor   # one-time: the formula lives in this repo
 brew install kumeS/tap/aixtexteditor
 ```
+
+> The `brew tap … <url>` line is required because the formula ships inside the app's
+> own repo rather than a separate `homebrew-tap` repo. (If you later create a
+> `kumeS/homebrew-tap` repo containing the formula, `brew install
+> kumeS/tap/aixtexteditor` works on its own, with no `brew tap` step.)
 
 This **builds aixTextEditor from source on your Mac**, so there is no notarization
 / *"app is damaged"* Gatekeeper prompt, and the binary matches your own CPU (Apple
