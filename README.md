@@ -153,60 +153,45 @@ snapshots, so existing chunk actions operate unchanged.
 
 ## Getting started
 
+### Install (recommended) — Homebrew
+
+```bash
+brew install kumeS/tap/aixtexteditor
+```
+
+This **builds aixTextEditor from source on your Mac**, so there is no notarization
+/ *"app is damaged"* Gatekeeper prompt, and the binary matches your own CPU (Apple
+Silicon or Intel). Homebrew installs Node and Rust automatically (Xcode Command
+Line Tools required); the first build takes a few minutes.
+
+Launch it from Spotlight as **aixTextEditor**, or:
+
+```bash
+aixtexteditor                                                    # CLI launcher
+# …or add it to /Applications:
+ln -sfn "$(brew --prefix)/opt/aixtexteditor/aixTextEditor.app" /Applications/
+```
+
+On first run, open **Settings** (gear icon, or `⌘/Ctrl+,`) and paste your
+OpenRouter API key (free key at https://openrouter.ai/keys). The default text model
+is free; change it (and the image model) to any id from
+https://openrouter.ai/models. The key is stored in the macOS keychain, never on
+disk in plaintext.
+
+> **Prebuilt `.dmg` alternative.** A `.dmg` is also published on the
+> [Releases](https://github.com/kumeS/aixTextEditor/releases) page (and via the
+> Homebrew **cask** [`Casks/aix-text-editor.rb`](Casks/aix-text-editor.rb)). That
+> build is *not notarized*, so macOS quarantines it on download — after installing,
+> clear the flag once with
+> `xattr -dr com.apple.quarantine "/Applications/aixTextEditor.app"`. The
+> source build above avoids this entirely.
+
+### Building from source manually (optional)
+
 ```bash
 npm install
-npm run tauri dev      # run the desktop app (hot reload)
+npm run tauri build    # → .app / .dmg under src-tauri/target/release/bundle/
 ```
-
-Then open **Settings** (gear icon, or `⌘/Ctrl+,`) and paste your OpenRouter API
-key (free key at https://openrouter.ai/keys). The default text model is a free
-model; change it (and the image model) to any current id from
-https://openrouter.ai/models.
-
-### Build installers
-
-```bash
-npm run tauri build    # → .dmg (macOS), .msi/.exe (Windows), etc.
-```
-
-The application icon is generated from a source image with
-`npm run tauri icon <path-to-1024px-png>`.
-
-### Installing a downloaded `.dmg` (macOS)
-
-The released build is **ad-hoc signed and not notarized** (it ships without a paid
-Apple Developer ID). macOS attaches a *quarantine* flag to anything downloaded from
-the internet, so on first launch Gatekeeper blocks it with
-**"aixTextEditor is damaged and can't be opened"** (or *"Apple could not verify…"*).
-The app is **not** actually damaged — this is expected for an unsigned build.
-
-To open it, clear the quarantine flag after installing:
-
-```bash
-# Open the .dmg, drag aixTextEditor into /Applications, then run:
-xattr -dr com.apple.quarantine "/Applications/aixTextEditor.app"
-
-# If macOS even refuses to open the .dmg itself, clear it first:
-xattr -dr com.apple.quarantine ~/Downloads/aixTextEditor_*.dmg
-```
-
-You only need to do this once per install. To remove the step entirely, build with
-an Apple Developer ID and notarize the bundle (see `.github/workflows/release.yml`).
-
-### Homebrew (macOS)
-
-A cask template lives at [`Casks/aix-text-editor.rb`](Casks/aix-text-editor.rb).
-It is **not installable as-is** — it needs a hosted GitHub Release `.dmg` and its
-`sha256`. Once a release and tap exist:
-
-```bash
-brew tap kumeS/tap
-brew install --cask aix-text-editor
-```
-
-Because the build is currently unsigned/un-notarized, Gatekeeper quarantines it;
-either notarize the build or run
-`xattr -dr com.apple.quarantine "/Applications/aixTextEditor.app"`.
 
 ## Notes & limitations
 

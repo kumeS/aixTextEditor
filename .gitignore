@@ -1,5 +1,22 @@
-# Logs
-logs
+# ── Dependencies ─────────────────────────────────────────────
+node_modules/
+
+# ── Build output (large; regenerated) ────────────────────────
+dist/
+dist-ssr/
+src-tauri/target/
+
+# ── Secrets / local env — NEVER commit these ─────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.mobileprovision
+
+# ── Logs ─────────────────────────────────────────────────────
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -7,16 +24,12 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# ── OS / editor cruft ────────────────────────────────────────
+.DS_Store
 *.local
-
-# Editor directories and files
 .vscode/*
 !.vscode/extensions.json
-.idea
-.DS_Store
+.idea/
 *.suo
 *.ntvs*
 *.njsproj
