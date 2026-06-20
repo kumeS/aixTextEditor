@@ -7,7 +7,6 @@ import {
   draftDocument,
   exportDocument,
   importDocument,
-  newDocument,
   openNative,
   saveNative,
 } from "../fileActions";
@@ -17,7 +16,6 @@ import { promptDialog } from "./PromptModal";
 import {
   DraftIcon,
   ExportIcon,
-  FileIcon,
   FolderIcon,
   ImportIcon,
   NetworkIcon,
@@ -50,8 +48,6 @@ function ToolButton({
 }
 
 export default function Toolbar() {
-  const dirty = useStore((s) => s.dirty);
-  const filePath = useStore((s) => s.filePath);
   const globalBusy = useStore((s) => s.globalBusy);
   const hasApiKey = useStore((s) => s.hasApiKey);
   const model = useStore((s) => s.settings?.model ?? "");
@@ -77,8 +73,6 @@ export default function Toolbar() {
     return () => document.removeEventListener("mousedown", onDown);
   }, [fileMenuOpen]);
 
-  const fileName = filePath ? filePath.split(/[\\/]/).pop() : "Untitled";
-
   const onImport = () => {
     setFileMenuOpen(false);
     void importDocument();
@@ -102,9 +96,6 @@ export default function Toolbar() {
   return (
     <header className="sticky top-0 z-20 flex items-center gap-1 border-b border-gray-200 bg-white/90 px-3 py-1.5 backdrop-blur">
       <div className="flex items-center gap-0.5">
-        <ToolButton onClick={() => newDocument()} title="New tab (⌘/Ctrl+T)">
-          <FileIcon /> New
-        </ToolButton>
         <ToolButton onClick={() => void openNative()} title="Open .aix document in a new tab">
           <FolderIcon /> Open
         </ToolButton>
@@ -179,15 +170,10 @@ export default function Toolbar() {
       <div className="flex-1" />
 
       {globalBusy && (
-        <div className="flex items-center gap-1.5 text-sm text-accent">
+        <div className="mr-2 flex items-center gap-1.5 text-sm text-accent">
           <SpinnerIcon className="text-accent" /> {globalBusy}
         </div>
       )}
-
-      <div className="mx-2 truncate text-xs text-ink-faint" title={filePath ?? ""}>
-        {fileName}
-        {dirty ? " •" : ""}
-      </div>
 
       <button
         onClick={openSettings}

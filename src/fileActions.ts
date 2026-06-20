@@ -35,11 +35,6 @@ function openInTab(doc: Document, filePath: string | null): void {
   useStore.getState().loadDocument(doc, filePath);
 }
 
-export function newDocument(): void {
-  // "New" opens a fresh tab (existing tabs are preserved).
-  useStore.getState().newTab();
-}
-
 /**
  * Generate a fresh document draft on a theme into a new tab, streaming the
  * result into the editor in real time.
@@ -54,17 +49,23 @@ export async function draftDocument(theme: string): Promise<void> {
   if (!theme.trim()) return;
   // Draft into a new tab (reuse a blank one) so current work is preserved.
   if (!activeIsPristine()) useStore.getState().newTab();
+  // Stream only while the draft's own tab stays active (the user may switch).
+  const draftTab = useStore.getState().activeTabId;
+  const onDraftTab = () => useStore.getState().activeTabId === draftTab;
   useStore.getState().setGlobalBusy("Drafting…");
   try {
     await api.aiDraftStream(theme.trim(), (e) => {
+      if (!onDraftTab()) return; // user switched tabs — don't write elsewhere
       if (e.kind === "update") {
         useStore.getState().setStreamingDocument(e.document);
       } else if (e.kind === "done") {
         useStore.getState().loadDocument(e.document, null);
       }
     });
-    const n = useStore.getState().doc.chunks.length;
-    useStore.getState().notify(`Draft created — ${n} chunks.`, "success");
+    if (onDraftTab()) {
+      const n = useStore.getState().doc.chunks.length;
+      useStore.getState().notify(`Draft created — ${n} chunks.`, "success");
+    }
   } catch (e) {
     useStore.getState().notify(message(e), "error");
   } finally {

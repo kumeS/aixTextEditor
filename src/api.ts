@@ -13,9 +13,6 @@ import type {
 } from "./types";
 
 export const api = {
-  newDocument: (title?: string) =>
-    invoke<Document>("new_document", { title: title ?? null }),
-
   importDocument: (path: string) =>
     invoke<Document>("import_document", { path }),
 
@@ -41,8 +38,6 @@ export const api = {
 
   aiProcess: (request: AiRequest) =>
     invoke<string>("ai_process", { request }),
-
-  aiDraft: (theme: string) => invoke<Document>("ai_draft", { theme }),
 
   /** Stream a draft; `onEvent` fires with live snapshots then the final document. */
   aiDraftStream: (theme: string, onEvent: (e: DraftEvent) => void) => {

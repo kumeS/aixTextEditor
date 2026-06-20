@@ -1,6 +1,6 @@
 [package]
 name = "aix-text-editor"
-version = "0.1.0"
+version = "1.0.0"
 description = "AIX Text Editor — LLM-augmented chunk-based editor for papers and reports"
 authors = ["Satoshi Kume"]
 license = "Artistic-2.0"

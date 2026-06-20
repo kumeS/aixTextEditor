@@ -199,7 +199,6 @@ interface AppActions {
   openSettings: () => void;
   closeSettings: () => void;
 
-  setAnalysis: (result: AnalysisResult | null) => void;
   applyAnalysis: (result: AnalysisResult) => void;
   toggleNetwork: (open?: boolean) => void;
 
@@ -218,7 +217,8 @@ let toastCounter = 0;
 function makeInitialDoc(): Document {
   return {
     id: localId(),
-    title: "Untitled Document",
+    // Empty title: the editor shows a grayed placeholder until the user types.
+    title: "",
     chunks: [emptyChunk(0)],
   };
 }
@@ -446,7 +446,8 @@ export const useStore = create<AppState & AppActions>((set, get) => {
       const newChunk = emptyChunk(0, type);
       commit((doc) =>
         mapChunks(doc, (chunks) => {
-          const idx = id ? chunks.findIndex((c) => c.id === id) : chunks.length - 1;
+          const found = id ? chunks.findIndex((c) => c.id === id) : -1;
+          const idx = found >= 0 ? found : chunks.length - 1;
           const next = [...chunks];
           next.splice(idx + 1, 0, newChunk);
           return reindex(next);
@@ -460,7 +461,8 @@ export const useStore = create<AppState & AppActions>((set, get) => {
       const newChunk: Chunk = { ...emptyChunk(0, "diagram"), content: code };
       commit((doc) =>
         mapChunks(doc, (chunks) => {
-          const idx = id ? chunks.findIndex((c) => c.id === id) : chunks.length - 1;
+          const found = id ? chunks.findIndex((c) => c.id === id) : -1;
+          const idx = found >= 0 ? found : chunks.length - 1;
           const next = [...chunks];
           next.splice(idx + 1, 0, newChunk);
           return reindex(next);
@@ -483,7 +485,8 @@ export const useStore = create<AppState & AppActions>((set, get) => {
       };
       commit((doc) =>
         mapChunks(doc, (chunks) => {
-          const idx = id ? chunks.findIndex((c) => c.id === id) : chunks.length - 1;
+          const found = id ? chunks.findIndex((c) => c.id === id) : -1;
+          const idx = found >= 0 ? found : chunks.length - 1;
           const next = [...chunks];
           next.splice(idx + 1, 0, newChunk);
           return reindex(next);
@@ -609,8 +612,6 @@ export const useStore = create<AppState & AppActions>((set, get) => {
     setHasApiKey: (has) => set({ hasApiKey: has }),
     openSettings: () => set({ settingsOpen: true }),
     closeSettings: () => set({ settingsOpen: false }),
-
-    setAnalysis: (result) => set({ analysis: result }),
 
     applyAnalysis: (result) =>
       set((state) => {

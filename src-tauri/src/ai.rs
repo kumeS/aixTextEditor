@@ -480,12 +480,6 @@ const DRAFT_SYSTEM_PROMPT: &str =
      Do NOT restate the theme verbatim as the very first line, and do NOT use bullet lists, tables, code \
      fences, or any commentary — output ONLY the draft itself (headings and paragraphs).";
 
-/// Generate a structured first draft (Markdown headings + paragraphs) on a theme.
-pub async fn generate_draft(config: &LlmConfig, theme: &str) -> AppResult<String> {
-    let provider = OpenRouterProvider::new(config.clone());
-    provider.complete(DRAFT_SYSTEM_PROMPT, theme.trim()).await
-}
-
 /// Stream a draft, invoking `on_delta` with the full accumulated text as it grows.
 pub async fn generate_draft_stream<F: FnMut(&str)>(
     config: &LlmConfig,

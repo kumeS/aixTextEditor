@@ -25,7 +25,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::new_document,
             commands::import_document,
             commands::export_document,
             commands::save_document_json,
@@ -36,7 +35,6 @@ pub fn run() {
             commands::has_api_key,
             commands::delete_api_key,
             commands::ai_process,
-            commands::ai_draft,
             commands::ai_draft_stream,
             commands::ai_generate_image,
             commands::ai_generate_diagram,

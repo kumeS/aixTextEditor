@@ -16,6 +16,10 @@ pub fn build<R: Runtime>(app: &App<R>) -> tauri::Result<Menu<R>> {
     let app_menu = SubmenuBuilder::new(app, "AIX Text Editor")
         .about(Some(AboutMetadata {
             name: Some("AIX Text Editor".into()),
+            version: Some(env!("CARGO_PKG_VERSION").into()),
+            copyright: Some(
+                "Copyright (c) 2026 Satoshi Kume. Artistic License 2.0.".into(),
+            ),
             ..Default::default()
         }))
         .separator()

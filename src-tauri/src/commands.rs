@@ -8,7 +8,7 @@
 use crate::ai::{self, AiRequest, LlmConfig};
 use crate::error::{AppError, AppResult};
 use crate::fileio;
-use crate::models::{AnalysisResult, Chunk, Document};
+use crate::models::{AnalysisResult, Document};
 use crate::settings::{self, Settings};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -51,13 +51,6 @@ fn load_image_llm_config(app: &AppHandle) -> AppResult<LlmConfig> {
 }
 
 // ----- document lifecycle --------------------------------------------------
-
-#[tauri::command]
-pub fn new_document(title: Option<String>) -> Document {
-    let mut doc = Document::new(&title.unwrap_or_else(|| "Untitled Document".to_string()));
-    doc.chunks.push(Chunk::new_text(0, ""));
-    doc
-}
 
 #[tauri::command]
 pub fn import_document(path: String) -> AppResult<Document> {
@@ -123,14 +116,6 @@ fn draft_title(theme: &str) -> String {
     } else {
         theme.trim().to_string()
     }
-}
-
-/// Generate a full document draft on a theme, split into paragraph + heading chunks.
-#[tauri::command]
-pub async fn ai_draft(app: AppHandle, theme: String) -> AppResult<Document> {
-    let config = load_llm_config(&app)?;
-    let markdown = ai::generate_draft(&config, &theme).await?;
-    Ok(fileio::text_to_document(&draft_title(&theme), &markdown))
 }
 
 /// Streaming draft event pushed to the frontend channel.

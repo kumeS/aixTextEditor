@@ -36,6 +36,15 @@ function message(e: unknown): string {
   return typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
 }
 
+/**
+ * True while `chunkId` still exists in the ACTIVE document — i.e. the user has
+ * not switched tabs (or deleted the chunk) during an async AI call. Guards
+ * against a result landing in the wrong tab when generation finishes late.
+ */
+function chunkStillActive(chunkId: string): boolean {
+  return useStore.getState().doc.chunks.some((c) => c.id === chunkId);
+}
+
 /** Translate / proofread / summarize / custom on a single chunk. */
 export async function runChunkAction(
   chunkId: string,
@@ -66,6 +75,10 @@ export async function runChunkAction(
       style: opts.style,
       instruction: opts.instruction,
     });
+    if (!chunkStillActive(chunkId)) {
+      s.notify("Switched away from that paragraph — result discarded.", "info");
+      return;
+    }
     if (action === "summarize") {
       useStore.getState().setChunkSummary(chunkId, result);
       s.notify("Summary added to paragraph metadata.", "success");
@@ -105,6 +118,10 @@ export async function generateDiagramFromChunk(
   s.setBusyChunk(chunkId, true);
   try {
     const code = await api.aiGenerateDiagram(chunk.content, instruction);
+    if (!chunkStillActive(chunkId)) {
+      s.notify("Switched away from that paragraph — diagram discarded.", "info");
+      return;
+    }
     useStore.getState().insertDiagramAfter(chunkId, code);
     s.notify("Diagram generated below the paragraph.", "success");
   } catch (e) {
@@ -130,6 +147,10 @@ export async function generateImageFromChunk(chunkId: string): Promise<void> {
   s.setBusyChunk(chunkId, true);
   try {
     const url = await api.aiGenerateImage(chunk.content);
+    if (!chunkStillActive(chunkId)) {
+      s.notify("Switched away from that paragraph — image discarded.", "info");
+      return;
+    }
     useStore.getState().insertImageAfter(chunkId, url, chunk.content.slice(0, 200));
     s.notify("Image generated below the paragraph.", "success");
   } catch (e) {
@@ -163,9 +184,14 @@ export async function generateImageFromSelection(): Promise<void> {
     return;
   }
   const insertAfterId = selectedInOrder[selectedInOrder.length - 1]?.id ?? null;
+  const tab = s.activeTabId;
   s.setGlobalBusy("Generating image…");
   try {
     const url = await api.aiGenerateImage(prompt);
+    if (useStore.getState().activeTabId !== tab) {
+      s.notify("Switched tabs — image discarded.", "info");
+      return;
+    }
     useStore.getState().insertImageAfter(insertAfterId, url, prompt.slice(0, 200));
     useStore.getState().clearSelection();
     s.notify("Image generated from selection.", "success");
@@ -184,9 +210,14 @@ export async function analyzeDocument(): Promise<void> {
     s.openSettings();
     return;
   }
+  const tab = s.activeTabId;
   s.setGlobalBusy("Analyzing document…");
   try {
     const result = await api.aiAnalyzeDocument(s.doc);
+    if (useStore.getState().activeTabId !== tab) {
+      s.notify("Switched tabs — analysis discarded.", "info");
+      return;
+    }
     // applyAnalysis persists the relationships into the document (spec §5) so
     // the graph survives a save/reopen and the document is marked dirty.
     useStore.getState().applyAnalysis(result);
