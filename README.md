@@ -1,14 +1,46 @@
-# aixTextEditor
+<div align="center">
 
-An LLM-augmented, **chunk-based** text editor for academic papers and long-form
-reports. Each paragraph is an independent "chunk" (like a Jupyter cell), so AI
-assistance — drafting, translation, proofreading, length/detail control, diagram
-and image generation, relationship analysis — always works with the surrounding
-context.
+<img src="src-tauri/icons/128x128@2x.png" alt="aixTextEditor icon" width="128" />
 
-Built with **Tauri v2 (Rust)** + **React + TypeScript** + **Tailwind CSS**, using
-**OpenRouter** (or any OpenAI-compatible endpoint) for AI. Repository / project
-folder: `aixTextEditor`.
+# ✦ aixTextEditor ✦
+
+### _AI × Chunks — The Next-Generation Writing Experience_
+
+[![Version](https://img.shields.io/badge/version-1.0.0-blue?style=for-the-badge)](https://github.com/kumeS/aixTextEditor/releases)
+[![License](https://img.shields.io/badge/license-Artistic--2.0-green?style=for-the-badge)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS-lightgrey?style=for-the-badge&logo=apple)](https://github.com/kumeS/aixTextEditor/releases)
+[![Tauri](https://img.shields.io/badge/Tauri-v2-FFC131?style=for-the-badge&logo=tauri&logoColor=white)](https://v2.tauri.app)
+[![Rust](https://img.shields.io/badge/Rust-backend-CE422B?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org)
+
+---
+
+**📝 Paragraph = Chunk. AI understands every chunk.**
+
+</div>
+
+<br/>
+
+> **aixTextEditor** is a radically new text editor that treats every paragraph as an independent **chunk** — like cells in a Jupyter Notebook.
+> Each chunk is a self-contained unit for editing and AI operations:
+> **translate, proofread, summarize, expand, generate diagrams, generate images, analyze relationships** — all executed with full awareness of surrounding context.
+>
+> Supercharge your writing — papers, reports, technical docs — **with AI, one chunk at a time.**
+
+<br/>
+
+<div align="center">
+
+🚀 **Streaming Draft** — Just enter a theme and watch a structured first draft generate in real time
+&nbsp;&nbsp;|&nbsp;&nbsp;
+🎨 **AI Image Generation** — Automatically create images from paragraph content
+&nbsp;&nbsp;|&nbsp;&nbsp;
+🔗 **Relationship Graph** — Visualize the logical structure between paragraphs
+
+</div>
+
+<br/>
+
+**Tech Stack**: Tauri v2 (Rust) + React + TypeScript + Tailwind CSS + OpenRouter (OpenAI-compatible)
 
 ## Features
 
