@@ -1,46 +1,76 @@
 <div align="center">
 
-<img src="src-tauri/icons/128x128@2x.png" alt="aixTextEditor icon" width="128" />
+<br/>
 
-# ✦ aixTextEditor ✦
-
-### _AI × Chunks — The Next-Generation Writing Experience_
-
-[![Version](https://img.shields.io/badge/version-1.0.0-blue?style=for-the-badge)](https://github.com/kumeS/aixTextEditor/releases)
-[![License](https://img.shields.io/badge/license-Artistic--2.0-green?style=for-the-badge)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-macOS-lightgrey?style=for-the-badge&logo=apple)](https://github.com/kumeS/aixTextEditor/releases)
-[![Tauri](https://img.shields.io/badge/Tauri-v2-FFC131?style=for-the-badge&logo=tauri&logoColor=white)](https://v2.tauri.app)
-[![Rust](https://img.shields.io/badge/Rust-backend-CE422B?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org)
-
----
-
-**📝 Paragraph = Chunk. AI understands every chunk.**
-
-</div>
+<img src="src-tauri/icons/128x128@2x.png" alt="aixTextEditor icon" width="160" />
 
 <br/>
 
-> **aixTextEditor** is a radically new text editor that treats every paragraph as an independent **chunk** — like cells in a Jupyter Notebook.
-> Each chunk is a self-contained unit for editing and AI operations:
-> **translate, proofread, summarize, expand, generate diagrams, generate images, analyze relationships** — all executed with full awareness of surrounding context.
->
-> Supercharge your writing — papers, reports, technical docs — **with AI, one chunk at a time.**
+# ─── ✦ &nbsp; a i x T e x t E d i t o r &nbsp; ✦ ───
+
+<h3>
+  <em>🧠 AI &nbsp;×&nbsp; 📝 Chunks &nbsp;—&nbsp; The Next-Generation Writing Experience</em>
+</h3>
+
+<br/>
+
+[![Version](https://img.shields.io/badge/🚀_v1.0.0-Release-0078D4?style=for-the-badge&logoColor=white)](https://github.com/kumeS/aixTextEditor/releases)
+&nbsp;
+[![License](https://img.shields.io/badge/📜_Artistic--2.0-License-2EA44F?style=for-the-badge)](LICENSE)
+&nbsp;
+[![Platform](https://img.shields.io/badge/🍎_macOS-Supported-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/kumeS/aixTextEditor/releases)
+
+[![Tauri](https://img.shields.io/badge/⚡_Tauri-v2-FFC131?style=for-the-badge&logo=tauri&logoColor=white)](https://v2.tauri.app)
+&nbsp;
+[![Rust](https://img.shields.io/badge/🦀_Rust-Backend-CE422B?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org)
+&nbsp;
+[![React](https://img.shields.io/badge/⚛️_React-Frontend-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
+&nbsp;
+[![TypeScript](https://img.shields.io/badge/🔷_TypeScript-Typed-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+
+<br/>
+
+---
+
+<h2>📝 Every Paragraph is a Chunk.&nbsp; AI Understands Every Chunk.</h2>
+
+---
+
+</div>
 
 <br/>
 
 <div align="center">
-
-🚀 **Streaming Draft** — Just enter a theme and watch a structured first draft generate in real time
-&nbsp;&nbsp;|&nbsp;&nbsp;
-🎨 **AI Image Generation** — Automatically create images from paragraph content
-&nbsp;&nbsp;|&nbsp;&nbsp;
-🔗 **Relationship Graph** — Visualize the logical structure between paragraphs
-
+<table>
+<tr>
+<td align="center" width="33%">
+<h3>🚀 Streaming Draft</h3>
+<p>Enter a theme → watch a fully structured<br/>first draft generate <strong>in real time</strong></p>
+</td>
+<td align="center" width="33%">
+<h3>🎨 AI Image Generation</h3>
+<p>Turn any paragraph into a visual —<br/><strong>images generated from your words</strong></p>
+</td>
+<td align="center" width="33%">
+<h3>🔗 Relationship Graph</h3>
+<p>Map the logical structure between<br/>paragraphs with <strong>interactive networks</strong></p>
+</td>
+</tr>
+</table>
 </div>
 
 <br/>
 
-**Tech Stack**: Tauri v2 (Rust) + React + TypeScript + Tailwind CSS + OpenRouter (OpenAI-compatible)
+> ### ✨ What is aixTextEditor?
+>
+> A **radically new** text editor where every paragraph lives as an independent **chunk** — think Jupyter Notebook cells, but for writing.
+>
+> Each chunk is a self-contained unit for editing **and** AI-powered operations:
+> **translate** · **proofread** · **summarize** · **expand** · **generate diagrams** · **generate images** · **analyze relationships** — all executed with full awareness of surrounding context.
+>
+> _Supercharge your writing — papers, reports, technical docs — **with AI, one chunk at a time.**_
+
+<br/>
 
 ## Features
 
