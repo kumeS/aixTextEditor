@@ -14,6 +14,7 @@ use uuid::Uuid;
 pub const CHUNK_TYPE_TEXT: &str = "text";
 pub const CHUNK_TYPE_DIAGRAM: &str = "diagram";
 pub const CHUNK_TYPE_HEADING: &str = "heading";
+pub const CHUNK_TYPE_IMAGE: &str = "image";
 pub const DIAGRAM_FORMAT_MERMAID: &str = "mermaid";
 
 /// Generate a fresh UUID v4 string id.
@@ -115,6 +116,10 @@ impl Chunk {
     pub fn is_heading(&self) -> bool {
         self.metadata.chunk_type == CHUNK_TYPE_HEADING
     }
+
+    pub fn is_image(&self) -> bool {
+        self.metadata.chunk_type == CHUNK_TYPE_IMAGE
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,6 +128,9 @@ pub struct Document {
     pub id: String,
     pub title: String,
     pub chunks: Vec<Chunk>,
+    /// Persisted relationship graph (spec §3.4) so it survives save/reopen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub analysis: Option<AnalysisResult>,
 }
 
 impl Document {
@@ -131,6 +139,50 @@ impl Document {
             id: new_id(),
             title: title.to_string(),
             chunks: Vec::new(),
+            analysis: None,
         }
     }
+}
+
+// ----- relationship analysis graph (spec §3.4) -----------------------------
+//
+// The graph has two node kinds: "paragraph" (id = chunk id) and "sentence"
+// (id = "<paragraphId>#s<n>", `parent` = the owning paragraph). Edges carry a
+// `relation` property naming the relationship type (cause, evidence, …).
+
+fn default_node_kind() -> String {
+    "paragraph".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisNode {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub summary: String,
+    /// "paragraph" or "sentence".
+    #[serde(default = "default_node_kind")]
+    pub kind: String,
+    /// For sentence nodes: id of the owning paragraph (chunk).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisEdge {
+    pub source: String,
+    pub target: String,
+    #[serde(default)]
+    pub relation: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalysisResult {
+    #[serde(default)]
+    pub nodes: Vec<AnalysisNode>,
+    #[serde(default)]
+    pub edges: Vec<AnalysisEdge>,
 }

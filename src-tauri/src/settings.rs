@@ -19,8 +19,12 @@ pub const DEFAULT_ENDPOINT: &str = "https://openrouter.ai/api/v1/chat/completion
 /// changes over time, so this is fully overridable from the Settings screen.
 pub const DEFAULT_MODEL: &str = "google/gemma-4-31b-it:free";
 
-/// Starter list of selectable models. Users add/remove their own from Settings;
-/// ids may change over time on OpenRouter, so the list is fully editable.
+/// Default image-generation model. NOTE: image model ids change over time on
+/// OpenRouter — these are starting points, fully editable from Settings.
+pub const DEFAULT_IMAGE_MODEL: &str = "google/gemini-2.5-flash-image";
+
+/// Starter list of selectable text models. Users add/remove their own from
+/// Settings; ids may change over time on OpenRouter, so the list is editable.
 fn default_models() -> Vec<String> {
     vec![
         DEFAULT_MODEL.to_string(),
@@ -30,16 +34,35 @@ fn default_models() -> Vec<String> {
     ]
 }
 
+fn default_image_model() -> String {
+    DEFAULT_IMAGE_MODEL.to_string()
+}
+
+/// Starter list of image-generation models (e.g. Google "Nano Banana"). Verify
+/// the exact ids on openrouter.ai/models — edit/add from Settings.
+fn default_image_models() -> Vec<String> {
+    vec![
+        DEFAULT_IMAGE_MODEL.to_string(), // Nano Banana (Gemini 2.5 Flash Image)
+        "google/gemini-3-pro-image-preview".to_string(), // Nano Banana Pro (verify id)
+    ]
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     pub endpoint: String,
-    /// The active model id used for requests.
+    /// The active text model id used for requests.
     pub model: String,
-    /// The user's selectable model list. `#[serde(default)]` keeps older
+    /// The user's selectable text-model list. `#[serde(default)]` keeps older
     /// settings files (without this field) loadable.
     #[serde(default = "default_models")]
     pub models: Vec<String>,
+    /// The active image-generation model id.
+    #[serde(default = "default_image_model")]
+    pub image_model: String,
+    /// The user's selectable image-model list.
+    #[serde(default = "default_image_models")]
+    pub image_models: Vec<String>,
     pub default_target_language: String,
     pub temperature: f32,
 }
@@ -50,6 +73,8 @@ impl Default for Settings {
             endpoint: DEFAULT_ENDPOINT.to_string(),
             model: DEFAULT_MODEL.to_string(),
             models: default_models(),
+            image_model: default_image_model(),
+            image_models: default_image_models(),
             default_target_language: "English".to_string(),
             temperature: 0.3,
         }

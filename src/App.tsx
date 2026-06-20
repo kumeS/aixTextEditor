@@ -2,14 +2,25 @@
 // relationship network panel docked on the right.
 
 import { Suspense, lazy, useEffect } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
+import { analyzeDocument } from "./aiActions";
+import {
+  draftDocument,
+  exportDocument,
+  importDocument,
+  openNative,
+  saveNative,
+} from "./fileActions";
 import { useStore } from "./store";
 import { useShortcuts } from "./useShortcuts";
 import Editor from "./components/Editor";
+import SelectionBar from "./components/SelectionBar";
 import SettingsModal from "./components/SettingsModal";
+import TabBar from "./components/TabBar";
 import Toolbar from "./components/Toolbar";
 import Toasts from "./components/Toasts";
-import { PromptHost } from "./components/PromptModal";
+import { PromptHost, promptDialog } from "./components/PromptModal";
 
 // Cytoscape is heavy; load the network panel only when it is first opened.
 const NetworkPanel = lazy(() => import("./components/NetworkPanel"));
@@ -21,6 +32,61 @@ function App() {
   const notify = useStore((s) => s.notify);
 
   useShortcuts();
+
+  // Native menu → dispatch to the same handlers as the in-app toolbar.
+  useEffect(() => {
+    const unlisten = listen<string>("menu", async (e) => {
+      const st = useStore.getState();
+      switch (e.payload) {
+        case "new_tab":
+          st.newTab();
+          break;
+        case "open":
+          void openNative();
+          break;
+        case "save":
+          void saveNative();
+          break;
+        case "import":
+          void importDocument();
+          break;
+        case "export_txt":
+          void exportDocument("txt");
+          break;
+        case "export_md":
+          void exportDocument("md");
+          break;
+        case "export_rtf":
+          void exportDocument("rtf");
+          break;
+        case "undo":
+          st.undo();
+          break;
+        case "redo":
+          st.redo();
+          break;
+        case "settings":
+          st.openSettings();
+          break;
+        case "analyze":
+          void analyzeDocument();
+          break;
+        case "draft": {
+          const theme = await promptDialog({
+            title: "Draft a document",
+            label: "What theme / topic should I draft about?",
+            multiline: true,
+            submitLabel: "Draft",
+          });
+          if (theme && theme.trim()) void draftDocument(theme);
+          break;
+        }
+      }
+    });
+    return () => {
+      void unlisten.then((f) => f());
+    };
+  }, []);
 
   // Load persisted settings + key status on startup.
   useEffect(() => {
@@ -51,6 +117,7 @@ function App() {
 
   return (
     <div className="flex h-full flex-col bg-white text-ink">
+      <TabBar />
       <Toolbar />
       <div className="flex min-h-0 flex-1">
         <main className="min-h-0 flex-1 overflow-y-auto">
@@ -71,6 +138,7 @@ function App() {
 
       <SettingsModal />
       <PromptHost />
+      <SelectionBar />
       <Toasts />
     </div>
   );

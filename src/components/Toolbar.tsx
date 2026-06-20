@@ -63,24 +63,28 @@ export default function Toolbar() {
   const toggleNetwork = useStore((s) => s.toggleNetwork);
   const networkOpen = useStore((s) => s.networkOpen);
 
-  const [exportOpen, setExportOpen] = useState(false);
-  const exportRef = useRef<HTMLDivElement>(null);
+  const [fileMenuOpen, setFileMenuOpen] = useState(false);
+  const fileMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!exportOpen) return;
+    if (!fileMenuOpen) return;
     const onDown = (e: MouseEvent) => {
-      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
-        setExportOpen(false);
+      if (fileMenuRef.current && !fileMenuRef.current.contains(e.target as Node)) {
+        setFileMenuOpen(false);
       }
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [exportOpen]);
+  }, [fileMenuOpen]);
 
   const fileName = filePath ? filePath.split(/[\\/]/).pop() : "Untitled";
 
+  const onImport = () => {
+    setFileMenuOpen(false);
+    void importDocument();
+  };
   const doExport = (fmt: ExportFormat) => {
-    setExportOpen(false);
+    setFileMenuOpen(false);
     void exportDocument(fmt);
   };
 
@@ -98,32 +102,43 @@ export default function Toolbar() {
   return (
     <header className="sticky top-0 z-20 flex items-center gap-1 border-b border-gray-200 bg-white/90 px-3 py-1.5 backdrop-blur">
       <div className="flex items-center gap-0.5">
-        <ToolButton onClick={() => void newDocument()} title="New document">
+        <ToolButton onClick={() => newDocument()} title="New tab (⌘/Ctrl+T)">
           <FileIcon /> New
         </ToolButton>
-        <ToolButton onClick={() => void openNative()} title="Open .aix document">
+        <ToolButton onClick={() => void openNative()} title="Open .aix document in a new tab">
           <FolderIcon /> Open
         </ToolButton>
         <ToolButton onClick={() => void saveNative()} title="Save (⌘/Ctrl+S)">
           <SaveIcon /> Save
         </ToolButton>
-        <ToolButton onClick={() => void importDocument()} title="Import .txt / .md / .rtf">
-          <ImportIcon /> Import
-        </ToolButton>
 
-        <div ref={exportRef} className="relative">
-          <ToolButton onClick={() => setExportOpen((v) => !v)} title="Export">
-            <ExportIcon /> Export
+        {/* Import + Export merged into one menu (choose after clicking). */}
+        <div ref={fileMenuRef} className="relative">
+          <ToolButton
+            onClick={() => setFileMenuOpen((v) => !v)}
+            title="Import or export .txt / .md / .rtf"
+          >
+            <ImportIcon /> Import / Export
           </ToolButton>
-          {exportOpen && (
-            <div className="absolute left-0 top-9 z-30 w-36 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
+          {fileMenuOpen && (
+            <div className="absolute left-0 top-9 z-30 w-52 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
+              <button
+                onClick={onImport}
+                className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-sm text-ink-soft hover:bg-gray-100"
+              >
+                <ImportIcon className="h-4 w-4" /> Import .txt / .md / .rtf…
+              </button>
+              <div className="my-1 border-t border-gray-100" />
+              <div className="px-2.5 pb-0.5 pt-1 text-xs font-medium text-ink-faint">
+                Export as
+              </div>
               {(["txt", "md", "rtf"] as ExportFormat[]).map((fmt) => (
                 <button
                   key={fmt}
                   onClick={() => doExport(fmt)}
-                  className="block w-full rounded px-2.5 py-1.5 text-left text-sm text-ink-soft hover:bg-gray-100"
+                  className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-sm text-ink-soft hover:bg-gray-100"
                 >
-                  Export as .{fmt}
+                  <ExportIcon className="h-4 w-4" /> .{fmt}
                 </button>
               ))}
             </div>

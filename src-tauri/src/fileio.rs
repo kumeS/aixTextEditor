@@ -185,6 +185,10 @@ fn chunk_as_markdown(chunk: &Chunk) -> String {
     if chunk.is_heading() {
         return format!("{} {}", heading_prefix(chunk), chunk.content.trim());
     }
+    if chunk.is_image() {
+        let caption = chunk.metadata.summary.clone().unwrap_or_default();
+        return format!("![{}]({})", caption, chunk.content.trim());
+    }
     if chunk.is_diagram() {
         let fmt = chunk
             .metadata
@@ -225,6 +229,8 @@ fn document_to_txt(doc: &Document) -> String {
         .map(|c| {
             if c.is_heading() {
                 format!("{} {}", heading_prefix(c), c.content.trim())
+            } else if c.is_image() {
+                format!("[Image: {}]", c.metadata.summary.clone().unwrap_or_default())
             } else {
                 c.content.clone()
             }
@@ -501,7 +507,11 @@ fn document_to_rtf(doc: &Document) -> String {
         if idx > 0 {
             out.push_str("\\par\n");
         }
-        if chunk.is_heading() {
+        if chunk.is_image() {
+            let caption = chunk.metadata.summary.clone().unwrap_or_default();
+            out.push_str(&rtf_escape(&format!("[Image: {caption}]")));
+            out.push_str("\\par\n");
+        } else if chunk.is_heading() {
             // Bold, size by level.
             let fs = match chunk.metadata.level.unwrap_or(1).clamp(1, 3) {
                 1 => 34,

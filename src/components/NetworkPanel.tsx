@@ -22,15 +22,28 @@ export default function NetworkPanel() {
     const nodeIds = new Set(analysis.nodes.map((n) => n.id));
     const elements: cytoscape.ElementDefinition[] = [];
     for (const n of analysis.nodes) {
-      elements.push({
-        data: { id: n.id, label: n.label || n.summary || "·", summary: n.summary },
-      });
+      const kind = n.kind === "sentence" ? "sentence" : "paragraph";
+      const data: Record<string, unknown> = {
+        id: n.id,
+        label: n.label || n.summary || "·",
+        summary: n.summary,
+        kind,
+      };
+      // Nest sentence nodes inside their paragraph (compound) when it exists.
+      if (kind === "sentence" && n.parent && nodeIds.has(n.parent)) {
+        data.parent = n.parent;
+      }
+      elements.push({ data });
     }
     analysis.edges.forEach((e, i) => {
-      if (nodeIds.has(e.source) && nodeIds.has(e.target)) {
+      if (
+        e.source !== e.target &&
+        nodeIds.has(e.source) &&
+        nodeIds.has(e.target)
+      ) {
         elements.push({
           data: {
-            id: `e${i}-${e.source}-${e.target}`,
+            id: `e${i}`,
             source: e.source,
             target: e.target,
             label: e.relation || "",
@@ -44,12 +57,13 @@ export default function NetworkPanel() {
       elements,
       style: [
         {
-          selector: "node",
+          selector: 'node[kind="paragraph"]',
           style: {
             "background-color": "#2563eb",
             label: "data(label)",
             color: "#1f2933",
             "font-size": 11,
+            "font-weight": "bold",
             "text-wrap": "wrap",
             "text-max-width": "120px",
             "text-valign": "bottom",
@@ -58,6 +72,41 @@ export default function NetworkPanel() {
             height: 18,
             "border-width": 2,
             "border-color": "#bfdbfe",
+          },
+        },
+        {
+          selector: 'node[kind="sentence"]',
+          style: {
+            "background-color": "#94a3b8",
+            label: "data(label)",
+            color: "#52606d",
+            "font-size": 8,
+            "text-wrap": "wrap",
+            "text-max-width": "90px",
+            "text-valign": "bottom",
+            "text-margin-y": 2,
+            width: 9,
+            height: 9,
+            "border-width": 1,
+            "border-color": "#e2e8f0",
+          },
+        },
+        {
+          // Paragraph nodes that contain sentence nodes render as a labelled box.
+          selector: ":parent",
+          style: {
+            "background-color": "#2563eb",
+            "background-opacity": 0.06,
+            "border-width": 1,
+            "border-color": "#bfdbfe",
+            shape: "round-rectangle",
+            padding: "10px",
+            label: "data(label)",
+            "font-size": 11,
+            "font-weight": "bold",
+            color: "#1f2933",
+            "text-valign": "top",
+            "text-margin-y": -2,
           },
         },
         {
@@ -87,7 +136,12 @@ export default function NetworkPanel() {
       maxZoom: 2.5,
     });
 
-    cy.on("tap", "node", (evt) => flashChunk(evt.target.id()));
+    cy.on("tap", "node", (evt) => {
+      // Sentence nodes jump to their owning paragraph; paragraphs to themselves.
+      const node = evt.target;
+      const parent = node.data("parent") as string | undefined;
+      flashChunk(parent || node.id());
+    });
     cyRef.current = cy;
 
     return () => {

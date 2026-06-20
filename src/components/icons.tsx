@@ -129,6 +129,27 @@ export const CloseIcon = (p: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+export const ImageIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <circle cx="9" cy="9" r="1.6" />
+    <path d="M4 17l5-5 4 4 3-3 4 4" />
+  </svg>
+);
+
+export const CheckSquareIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="4" y="4" width="16" height="16" rx="2" />
+    <path d="M8.5 12l2.5 2.5 5-5.5" />
+  </svg>
+);
+
+export const SquareIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="4" y="4" width="16" height="16" rx="2" />
+  </svg>
+);
+
 export const DraftIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <path d="M4 6h11M4 11h8M4 16h5" />

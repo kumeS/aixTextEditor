@@ -71,6 +71,21 @@ model; change it to any current model id from https://openrouter.ai/models
 npm run tauri build    # → .dmg (macOS), .msi/.exe (Windows), etc.
 ```
 
+### Homebrew (macOS)
+
+A cask template lives at [`Casks/aix-text-editor.rb`](Casks/aix-text-editor.rb).
+It is **not yet installable as-is** — it needs a hosted GitHub Release `.dmg` and
+its `sha256`. Once you publish a release and a tap:
+
+```bash
+brew tap kumeS/tap
+brew install --cask aix-text-editor
+```
+
+Because the build is currently unsigned/un-notarized, Gatekeeper quarantines it;
+either notarize the build or run
+`xattr -dr com.apple.quarantine "/Applications/AIX Text Editor.app"`.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
@@ -96,3 +111,8 @@ npm run tauri build    # → .dmg (macOS), .msi/.exe (Windows), etc.
   `summary`/`linkedChunks` metadata) can shift across a text-format round-trip.
   Use `.aix` to preserve the document exactly. (Markdown does round-trip the
   title: a leading `# Heading` is promoted back to the document title.)
+
+## License
+
+Copyright (c) 2026 Satoshi Kume. Released under the **Artistic License 2.0** —
+see [LICENSE](LICENSE).

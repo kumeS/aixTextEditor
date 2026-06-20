@@ -2,11 +2,12 @@
 // All argument keys are single words, so JS camelCase maps directly to the Rust
 // snake_case parameter names.
 
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   AiRequest,
   AnalysisResult,
   Document,
+  DraftEvent,
   ExportFormat,
   Settings,
 } from "./types";
@@ -42,6 +43,16 @@ export const api = {
     invoke<string>("ai_process", { request }),
 
   aiDraft: (theme: string) => invoke<Document>("ai_draft", { theme }),
+
+  /** Stream a draft; `onEvent` fires with live snapshots then the final document. */
+  aiDraftStream: (theme: string, onEvent: (e: DraftEvent) => void) => {
+    const channel = new Channel<DraftEvent>();
+    channel.onmessage = onEvent;
+    return invoke<void>("ai_draft_stream", { theme, onEvent: channel });
+  },
+
+  aiGenerateImage: (prompt: string) =>
+    invoke<string>("ai_generate_image", { prompt }),
 
   aiGenerateDiagram: (text: string, instruction?: string) =>
     invoke<string>("ai_generate_diagram", {

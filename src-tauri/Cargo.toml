@@ -2,7 +2,8 @@
 name = "aix-text-editor"
 version = "0.1.0"
 description = "AIX Text Editor — LLM-augmented chunk-based editor for papers and reports"
-authors = ["AIX Text Editor contributors"]
+authors = ["Satoshi Kume"]
+license = "Artistic-2.0"
 edition = "2021"
 rust-version = "1.77"
 
@@ -26,7 +27,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 # rustls avoids a system OpenSSL/native-tls dependency, keeping the build portable.
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# `stream` enables byte-stream responses for SSE token streaming (Draft).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+futures-util = "0.3"
 # OS-native secret storage: macOS Keychain / Windows Credential Manager / Linux Secret Service.
 # Each backend is target-gated inside the crate, so listing all is safe cross-platform.
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }

@@ -8,7 +8,7 @@
 // component (Phase 5 performance goal).
 
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { runChunkAction } from "../aiActions";
+import { generateImageFromChunk, runChunkAction } from "../aiActions";
 import { caretVerticalEdge } from "../caret";
 import { useStore } from "../store";
 import ChunkAiMenu from "./ChunkAiMenu";
@@ -16,8 +16,11 @@ import MermaidChunk from "./MermaidChunk";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
+  CheckSquareIcon,
   FlowIcon,
+  ImageIcon,
   PlusIcon,
+  SquareIcon,
   SummaryIcon,
   TrashIcon,
 } from "./icons";
@@ -50,6 +53,8 @@ export default function ChunkView({ chunkId, index, total }: Props) {
   const setChunkType = useStore((s) => s.setChunkType);
   const setHeadingLevel = useStore((s) => s.setHeadingLevel);
   const convertToHeading = useStore((s) => s.convertToHeading);
+  const isSelected = useStore((s) => s.selectedChunkIds.includes(chunkId));
+  const toggleSelectChunk = useStore((s) => s.toggleSelectChunk);
 
   const textRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -87,6 +92,7 @@ export default function ChunkView({ chunkId, index, total }: Props) {
   const type = chunk.metadata.chunkType;
   const isText = type === "text";
   const isHeading = type === "heading";
+  const isImage = type === "image";
   const headingLevel = Math.min(Math.max(chunk.metadata.level ?? 1, 1), 3);
 
   // Typing "# ", "## " or "### " at the start of a text chunk turns it into a
@@ -127,7 +133,16 @@ export default function ChunkView({ chunkId, index, total }: Props) {
       const chunks = useStore.getState().doc.chunks;
       const here = chunks.findIndex((c) => c.id === chunkId);
       const up = e.key === "ArrowUp";
-      const target = up ? chunks[here - 1] : chunks[here + 1];
+      // Skip image chunks (they have no editable textarea to land in).
+      let ti = up ? here - 1 : here + 1;
+      while (
+        ti >= 0 &&
+        ti < chunks.length &&
+        chunks[ti].metadata.chunkType === "image"
+      ) {
+        ti += up ? -1 : 1;
+      }
+      const target = chunks[ti];
       if (target) {
         const edge = caretVerticalEdge(el);
         if ((up && edge.atFirstLine) || (!up && edge.atLastLine)) {
@@ -173,7 +188,7 @@ export default function ChunkView({ chunkId, index, total }: Props) {
       data-chunk-id={chunkId}
       className={`group relative rounded-md transition-shadow ${
         isFlashing ? "ring-2 ring-accent/60" : ""
-      }`}
+      } ${isSelected ? "bg-accent/5 ring-1 ring-accent/40" : ""}`}
     >
       {/* Left gutter: AI actions + focused accent rail. Shown only for the
           selected (focused) chunk — or while a chunk is busy — so menus don't
@@ -208,7 +223,30 @@ export default function ChunkView({ chunkId, index, total }: Props) {
       />
 
       {/* Body */}
-      {isHeading ? (
+      {isImage ? (
+        <div
+          tabIndex={0}
+          onFocus={() => setFocused(chunkId)}
+          className="my-1 outline-none"
+        >
+          {chunk.content ? (
+            <img
+              src={chunk.content}
+              alt={chunk.metadata.summary || "Generated image"}
+              className="max-h-[28rem] max-w-full rounded-lg border border-gray-200"
+            />
+          ) : (
+            <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-ink-faint">
+              (empty image)
+            </div>
+          )}
+          {chunk.metadata.summary && (
+            <div className="mt-1 text-xs italic text-ink-faint">
+              {chunk.metadata.summary}
+            </div>
+          )}
+        </div>
+      ) : isHeading ? (
         <textarea
           ref={textRef}
           value={chunk.content}
@@ -258,19 +296,39 @@ export default function ChunkView({ chunkId, index, total }: Props) {
         </div>
       )}
 
-      {/* Summary metadata badge (set via Summarize action) */}
-      {chunk.metadata.summary && (
+      {/* Summary metadata badge (set via Summarize action). Image chunks show
+          their prompt inline, so skip the duplicate badge here. */}
+      {!isImage && chunk.metadata.summary && (
         <div className="mt-1 flex items-start gap-1.5 text-xs text-ink-faint">
           <SummaryIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span className="italic">{chunk.metadata.summary}</span>
         </div>
       )}
 
-      {/* Right gutter: structural controls. Shown only for the selected chunk. */}
+      {/* Right gutter: structural + image controls. Shown for the focused or
+          selected chunk. */}
       <div
         className="absolute -right-11 top-0 flex flex-col gap-0.5 opacity-0 pointer-events-none transition-opacity focus-within:opacity-100 data-[on=true]:opacity-100 data-[on=true]:pointer-events-auto"
-        data-on={isFocused}
+        data-on={isFocused || isSelected}
       >
+        <button
+          className={`${gutterBtn} ${isSelected ? "text-accent" : ""}`}
+          title={isSelected ? "Deselect paragraph" : "Select (for image gen)"}
+          aria-pressed={isSelected}
+          onClick={() => toggleSelectChunk(chunkId)}
+        >
+          {isSelected ? <CheckSquareIcon /> : <SquareIcon />}
+        </button>
+        {(isText || isHeading) && (
+          <button
+            className={`${gutterBtn} hover:text-accent`}
+            title="Generate image from this paragraph"
+            disabled={busy}
+            onClick={() => void generateImageFromChunk(chunkId)}
+          >
+            <ImageIcon />
+          </button>
+        )}
         <button
           className={gutterBtn}
           title="Add paragraph below"
@@ -294,13 +352,15 @@ export default function ChunkView({ chunkId, index, total }: Props) {
         >
           <ArrowDownIcon />
         </button>
-        <button
-          className={gutterBtn}
-          title={isText ? "Convert to diagram" : "Convert to text"}
-          onClick={() => setChunkType(chunkId, isText ? "diagram" : "text")}
-        >
-          <FlowIcon />
-        </button>
+        {!isImage && (
+          <button
+            className={gutterBtn}
+            title={isText ? "Convert to diagram" : "Convert to text"}
+            onClick={() => setChunkType(chunkId, isText ? "diagram" : "text")}
+          >
+            <FlowIcon />
+          </button>
+        )}
         <button
           className={`${gutterBtn} hover:text-red-500`}
           title="Delete paragraph"

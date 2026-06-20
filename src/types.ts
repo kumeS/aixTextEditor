@@ -2,7 +2,7 @@
 // settings.rs). All Rust structs use `#[serde(rename_all = "camelCase")]`, so
 // these field names line up 1:1 across the IPC boundary.
 
-export type ChunkType = "text" | "diagram" | "heading";
+export type ChunkType = "text" | "diagram" | "heading" | "image";
 
 export interface ChunkMetadata {
   chunkType: ChunkType;
@@ -23,12 +23,15 @@ export interface Document {
   id: string;
   title: string;
   chunks: Chunk[];
+  analysis?: AnalysisResult; // persisted relationship graph (spec §3.4)
 }
 
 export interface Settings {
   endpoint: string;
-  model: string; // the active model id
-  models: string[]; // the user's selectable model list (persisted)
+  model: string; // active text model id
+  models: string[]; // selectable text-model list (persisted)
+  imageModel: string; // active image-generation model id
+  imageModels: string[]; // selectable image-model list (persisted)
   defaultTargetLanguage: string;
   temperature: number;
 }
@@ -53,10 +56,14 @@ export interface AiRequest {
   instruction?: string;
 }
 
+export type AnalysisNodeKind = "paragraph" | "sentence";
+
 export interface AnalysisNode {
   id: string;
   label: string;
   summary: string;
+  kind?: AnalysisNodeKind; // defaults to "paragraph"
+  parent?: string; // owning paragraph id, for sentence nodes
 }
 
 export interface AnalysisEdge {
@@ -71,3 +78,8 @@ export interface AnalysisResult {
 }
 
 export type ExportFormat = "txt" | "md" | "rtf";
+
+/** Streaming draft events from the `ai_draft_stream` command channel. */
+export type DraftEvent =
+  | { kind: "update"; document: Document } // live snapshot (position-based ids)
+  | { kind: "done"; document: Document }; // final document (real ids)

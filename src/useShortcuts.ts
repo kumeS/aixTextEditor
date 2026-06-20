@@ -18,6 +18,9 @@ export function useShortcuts() {
       } else if (key === "o") {
         e.preventDefault();
         void openNative();
+      } else if (key === "t") {
+        e.preventDefault();
+        useStore.getState().newTab();
       } else if (key === "z" && !e.shiftKey) {
         e.preventDefault();
         useStore.getState().undo();

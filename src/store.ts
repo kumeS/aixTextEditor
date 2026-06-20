@@ -66,6 +66,7 @@ function rebuildAnalysis(doc: Document): AnalysisResult | null {
       id: c.id,
       label: firstWords(summary || c.content) || "·",
       summary,
+      kind: "paragraph" as const,
     };
   });
   const edges: AnalysisResult["edges"] = [];
@@ -84,16 +85,70 @@ export interface Toast {
   kind: ToastKind;
 }
 
+/**
+ * Per-document state captured when a tab is backgrounded. The ACTIVE tab's
+ * state lives in the top-level fields below; inactive tabs are stored as these
+ * snapshots. This set must mirror EXACTLY the per-document fields (so nothing
+ * leaks across tabs — e.g. filePath, or a save would overwrite another tab's file).
+ */
+interface TabSnapshot {
+  doc: Document;
+  filePath: string | null;
+  dirty: boolean;
+  past: Document[];
+  future: Document[];
+  analysis: AnalysisResult | null;
+  focusedChunkId: string | null;
+  lastEditChunkId: string | null;
+}
+
+function snapshotActive(s: AppState): TabSnapshot {
+  return {
+    doc: s.doc,
+    filePath: s.filePath,
+    dirty: s.dirty,
+    past: s.past,
+    future: s.future,
+    analysis: s.analysis,
+    focusedChunkId: s.focusedChunkId,
+    lastEditChunkId: s.lastEditChunkId,
+  };
+}
+
+function applySnapshot(snap: TabSnapshot) {
+  return {
+    doc: snap.doc,
+    filePath: snap.filePath,
+    dirty: snap.dirty,
+    past: snap.past,
+    future: snap.future,
+    analysis: snap.analysis,
+    focusedChunkId: snap.focusedChunkId,
+    lastEditChunkId: snap.lastEditChunkId,
+    flashChunkId: null,
+    selectedChunkIds: [],
+  };
+}
+
+const INITIAL_TAB_ID = "tab-1";
+
 interface AppState {
+  // ----- active tab's document state (the live fields) -----
   doc: Document;
   filePath: string | null; // current native (.aix) file, if any
   dirty: boolean;
+
+  // ----- tabs -----
+  tabOrder: string[];
+  activeTabId: string;
+  inactiveTabs: Record<string, TabSnapshot>;
 
   settings: Settings | null;
   hasApiKey: boolean;
 
   focusedChunkId: string | null;
   flashChunkId: string | null; // transient highlight target (network-graph jump)
+  selectedChunkIds: string[]; // multi-select (e.g. for image generation)
   busyChunks: Record<string, boolean>;
   globalBusy: string | null; // label of an in-flight global operation
 
@@ -111,6 +166,10 @@ interface AppState {
 
 interface AppActions {
   loadDocument: (doc: Document, filePath?: string | null) => void;
+  setStreamingDocument: (doc: Document) => void;
+  newTab: () => void;
+  switchTab: (id: string) => void;
+  closeTab: (id: string) => void;
   setTitle: (title: string) => void;
 
   updateChunkContent: (id: string, content: string) => void;
@@ -122,6 +181,7 @@ interface AppActions {
 
   addChunkAfter: (id: string | null, type?: ChunkType) => string;
   insertDiagramAfter: (id: string | null, code: string) => string;
+  insertImageAfter: (id: string | null, url: string, prompt: string) => string;
   splitChunk: (id: string, caret: number) => string | null;
   deleteChunk: (id: string) => void;
   mergeWithPrevious: (id: string) => string | null;
@@ -129,6 +189,8 @@ interface AppActions {
 
   setFocused: (id: string | null) => void;
   flashChunk: (id: string) => void;
+  toggleSelectChunk: (id: string) => void;
+  clearSelection: () => void;
   setBusyChunk: (id: string, busy: boolean) => void;
   setGlobalBusy: (label: string | null) => void;
 
@@ -181,10 +243,14 @@ export const useStore = create<AppState & AppActions>((set, get) => {
     doc: makeInitialDoc(),
     filePath: null,
     dirty: false,
+    tabOrder: [INITIAL_TAB_ID],
+    activeTabId: INITIAL_TAB_ID,
+    inactiveTabs: {},
     settings: null,
     hasApiKey: false,
     focusedChunkId: null,
     flashChunkId: null,
+    selectedChunkIds: [],
     busyChunks: {},
     globalBusy: null,
     analysis: null,
@@ -202,10 +268,75 @@ export const useStore = create<AppState & AppActions>((set, get) => {
         dirty: false,
         past: [],
         future: [],
-        // Restore the relationship graph from persisted metadata (spec §5).
-        analysis: rebuildAnalysis(doc),
+        // Prefer the persisted full graph (paragraph + sentence nodes); fall back
+        // to reconstructing a paragraph-only graph from older linkedChunks docs.
+        analysis: doc.analysis ?? rebuildAnalysis(doc),
         focusedChunkId: doc.chunks[0]?.id ?? null,
         lastEditChunkId: null,
+        selectedChunkIds: [],
+      }),
+
+    // Live streaming snapshot (Draft): replace the document only — no history,
+    // no dirty/focus churn. Chunks carry stable position ids so React reconciles
+    // in place. loadDocument() finalises the stream.
+    setStreamingDocument: (doc) => set({ doc }),
+
+    // ----- tabs: active tab lives in top-level fields; others as snapshots -----
+    newTab: () =>
+      set((s) => {
+        const id = localId();
+        const fresh = makeInitialDoc();
+        return {
+          inactiveTabs: { ...s.inactiveTabs, [s.activeTabId]: snapshotActive(s) },
+          tabOrder: [...s.tabOrder, id],
+          activeTabId: id,
+          doc: fresh,
+          filePath: null,
+          dirty: false,
+          past: [],
+          future: [],
+          analysis: null,
+          focusedChunkId: fresh.chunks[0]?.id ?? null,
+          lastEditChunkId: null,
+          flashChunkId: null,
+          selectedChunkIds: [],
+        };
+      }),
+
+    switchTab: (id) =>
+      set((s) => {
+        if (id === s.activeTabId) return {};
+        const target = s.inactiveTabs[id];
+        if (!target) return {};
+        const inactiveTabs = {
+          ...s.inactiveTabs,
+          [s.activeTabId]: snapshotActive(s),
+        };
+        delete inactiveTabs[id];
+        return { activeTabId: id, inactiveTabs, ...applySnapshot(target) };
+      }),
+
+    closeTab: (id) =>
+      set((s) => {
+        if (s.tabOrder.length <= 1) return {}; // always keep one tab open
+        const idx = s.tabOrder.indexOf(id);
+        const order = s.tabOrder.filter((t) => t !== id);
+        if (id !== s.activeTabId) {
+          const inactiveTabs = { ...s.inactiveTabs };
+          delete inactiveTabs[id];
+          return { tabOrder: order, inactiveTabs };
+        }
+        // Closing the active tab: activate a neighbour (its snapshot).
+        const neighbourId = order[Math.min(idx, order.length - 1)];
+        const target = s.inactiveTabs[neighbourId];
+        const inactiveTabs = { ...s.inactiveTabs };
+        delete inactiveTabs[neighbourId];
+        return {
+          tabOrder: order,
+          activeTabId: neighbourId,
+          inactiveTabs,
+          ...(target ? applySnapshot(target) : {}),
+        };
       }),
 
     setTitle: (title) =>
@@ -339,6 +470,29 @@ export const useStore = create<AppState & AppActions>((set, get) => {
       return newChunk.id;
     },
 
+    insertImageAfter: (id, url, prompt) => {
+      const newChunk: Chunk = {
+        id: localId(),
+        order: 0,
+        content: url,
+        metadata: {
+          chunkType: "image",
+          summary: prompt.trim() || undefined,
+          linkedChunks: [],
+        },
+      };
+      commit((doc) =>
+        mapChunks(doc, (chunks) => {
+          const idx = id ? chunks.findIndex((c) => c.id === id) : chunks.length - 1;
+          const next = [...chunks];
+          next.splice(idx + 1, 0, newChunk);
+          return reindex(next);
+        })
+      );
+      set({ focusedChunkId: newChunk.id });
+      return newChunk.id;
+    },
+
     splitChunk: (id, caret) => {
       const chunk = get().doc.chunks.find((c) => c.id === id);
       if (!chunk || chunk.metadata.chunkType !== "text") return null;
@@ -435,6 +589,13 @@ export const useStore = create<AppState & AppActions>((set, get) => {
         if (get().flashChunkId === id) set({ flashChunkId: null });
       }, 1600);
     },
+    toggleSelectChunk: (id) =>
+      set((s) => ({
+        selectedChunkIds: s.selectedChunkIds.includes(id)
+          ? s.selectedChunkIds.filter((x) => x !== id)
+          : [...s.selectedChunkIds, id],
+      })),
+    clearSelection: () => set({ selectedChunkIds: [] }),
     setBusyChunk: (id, busy) =>
       set((s) => {
         const busyChunks = { ...s.busyChunks };
@@ -494,7 +655,9 @@ export const useStore = create<AppState & AppActions>((set, get) => {
           };
         });
         return {
-          doc: { ...state.doc, chunks },
+          // Persist the full graph on the document so it survives save/reopen
+          // (single source of truth; also keep linkedChunks for the §5 model).
+          doc: { ...state.doc, chunks, analysis: result },
           analysis: result,
           dirty: true,
           future: [],

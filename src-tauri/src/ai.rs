@@ -10,8 +10,9 @@
 //! §3.1, "context-aware editing") so the model produces logically coherent text.
 
 use crate::error::{AppError, AppResult};
-use crate::models::{Document, CHUNK_TYPE_TEXT};
-use serde::{Deserialize, Serialize};
+use crate::models::{AnalysisResult, Document, CHUNK_TYPE_TEXT};
+use futures_util::StreamExt;
+use serde::Deserialize;
 use serde_json::json;
 
 /// Configuration needed to reach a provider for a single request.
@@ -129,6 +130,95 @@ impl LlmProvider for OpenRouterProvider {
     }
 }
 
+impl OpenRouterProvider {
+    /// Stream a completion token-by-token. `on_delta` is called with the FULL
+    /// accumulated text each time new content arrives; the final text is returned.
+    pub async fn complete_stream<F: FnMut(&str)>(
+        &self,
+        system: &str,
+        user: &str,
+        mut on_delta: F,
+    ) -> AppResult<String> {
+        let client = reqwest::Client::new();
+        let res = client
+            .post(&self.config.endpoint)
+            .header("Authorization", format!("Bearer {}", self.config.api_key))
+            .header("HTTP-Referer", "https://github.com/kumeS/AIX_Text_Editor")
+            .header("X-Title", "AIX Text Editor")
+            .json(&json!({
+                "model": self.config.model,
+                "temperature": self.config.temperature,
+                "stream": true,
+                "messages": [
+                    { "role": "system", "content": system },
+                    { "role": "user", "content": user }
+                ]
+            }))
+            .send()
+            .await?;
+
+        let status = res.status();
+        if !status.is_success() {
+            let body: serde_json::Value = res.json().await.unwrap_or_else(|_| json!({}));
+            let provider_msg = body["error"]["message"]
+                .as_str()
+                .or_else(|| body["error"].as_str())
+                .unwrap_or("unknown error");
+            return Err(AppError::Network(match status.as_u16() {
+                429 => format!(
+                    "Rate limited (429). Free OpenRouter models share tight limits — wait a minute and \
+                     retry, switch to another model in Settings, or add credit at openrouter.ai. \
+                     (provider: {provider_msg})"
+                ),
+                401 | 403 => format!(
+                    "Authorization failed ({}). Check your OpenRouter API key in Settings. \
+                     (provider: {provider_msg})",
+                    status.as_u16()
+                ),
+                code => format!("API {code}: {provider_msg}"),
+            }));
+        }
+
+        // Server-Sent Events: bytes arrive on arbitrary boundaries, so buffer
+        // raw bytes and only parse COMPLETE lines (split on '\n'). A multibyte
+        // UTF-8 char never contains 0x0A, so splitting on the newline byte is safe.
+        let mut stream = res.bytes_stream();
+        let mut buf: Vec<u8> = Vec::new();
+        let mut full = String::new();
+
+        while let Some(item) = stream.next().await {
+            let bytes = item.map_err(AppError::from)?;
+            buf.extend_from_slice(&bytes);
+
+            while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+                let line_bytes: Vec<u8> = buf.drain(..=pos).collect();
+                let line = String::from_utf8_lossy(&line_bytes[..line_bytes.len() - 1]);
+                let line = line.trim_end_matches('\r').trim();
+
+                if line.is_empty() || line.starts_with(':') {
+                    continue; // blank line or SSE comment / keep-alive
+                }
+                let Some(data) = line.strip_prefix("data:") else {
+                    continue;
+                };
+                let data = data.trim();
+                if data == "[DONE]" {
+                    return Ok(full);
+                }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
+                    if let Some(delta) = v["choices"][0]["delta"]["content"].as_str() {
+                        if !delta.is_empty() {
+                            full.push_str(delta);
+                            on_delta(&full);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(full)
+    }
+}
+
 // ----- request / result types --------------------------------------------
 
 #[derive(Debug, Clone, Deserialize)]
@@ -152,35 +242,8 @@ pub struct AiRequest {
     pub instruction: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AnalysisNode {
-    pub id: String,
-    pub label: String,
-    #[serde(default)]
-    pub summary: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AnalysisEdge {
-    pub source: String,
-    pub target: String,
-    #[serde(default)]
-    pub relation: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AnalysisResult {
-    // Models sometimes omit an empty array entirely (e.g. nodes-only when no
-    // relations are found). Default both so a partial result still parses
-    // instead of failing the whole analysis with a "missing field" error.
-    #[serde(default)]
-    pub nodes: Vec<AnalysisNode>,
-    #[serde(default)]
-    pub edges: Vec<AnalysisEdge>,
-}
+// Analysis graph types (AnalysisNode/Edge/Result) live in `models.rs` so they
+// can be persisted on `Document`.
 
 // ----- high-level operations ----------------------------------------------
 
@@ -308,17 +371,131 @@ pub async fn generate_diagram(
     Ok(strip_code_fences(&raw))
 }
 
+/// Generate an image from a text prompt using the configured image model.
+/// Returns a data URL (or remote URL). Fails loud (with a response hint) if no
+/// image is found, rather than silently producing a blank image.
+pub async fn generate_image(config: &LlmConfig, prompt: &str) -> AppResult<String> {
+    let client = reqwest::Client::new();
+    let res = client
+        .post(&config.endpoint)
+        .header("Authorization", format!("Bearer {}", config.api_key))
+        .header("HTTP-Referer", "https://github.com/kumeS/AIX_Text_Editor")
+        .header("X-Title", "AIX Text Editor")
+        .json(&json!({
+            "model": config.model,
+            "messages": [{ "role": "user", "content": prompt }],
+            // Ask image-capable models (e.g. Gemini "Nano Banana") for image output.
+            "modalities": ["image", "text"]
+        }))
+        .send()
+        .await?;
+
+    let status = res.status();
+    let body: serde_json::Value = res.json().await?;
+    if !status.is_success() {
+        let provider_msg = body["error"]["message"]
+            .as_str()
+            .or_else(|| body["error"].as_str())
+            .unwrap_or("unknown error");
+        return Err(AppError::Network(format!(
+            "Image API {}: {provider_msg}",
+            status.as_u16()
+        )));
+    }
+
+    if let Some(url) = extract_image_url(&body) {
+        return Ok(url);
+    }
+    // Fail loud with a short hint of the response shape (base64 can be huge).
+    let hint: String = body.to_string().chars().take(300).collect();
+    Err(AppError::Network(format!(
+        "The image model returned no image. Verify '{}' is an image-generation model \
+         on openrouter.ai/models. Response (truncated): {hint}",
+        config.model
+    )))
+}
+
+/// Best-effort extraction of a generated image URL from various response shapes.
+fn extract_image_url(body: &serde_json::Value) -> Option<String> {
+    let msg = &body["choices"][0]["message"];
+
+    // 1) OpenRouter image-capable chat: message.images[].image_url.url
+    if let Some(images) = msg["images"].as_array() {
+        for img in images {
+            for path in [&img["image_url"]["url"], &img["url"]] {
+                if let Some(u) = path.as_str() {
+                    if !u.is_empty() {
+                        return Some(u.to_string());
+                    }
+                }
+            }
+        }
+    }
+    // 2) message.content is a string containing a data: URL
+    if let Some(content) = msg["content"].as_str() {
+        if let Some(u) = find_data_url(content) {
+            return Some(u);
+        }
+    }
+    // 3) message.content is an array of parts ({type:"image_url", image_url:{url}})
+    if let Some(parts) = msg["content"].as_array() {
+        for p in parts {
+            if let Some(u) = p["image_url"]["url"].as_str() {
+                if !u.is_empty() {
+                    return Some(u.to_string());
+                }
+            }
+        }
+    }
+    // 4) OpenAI images-API style: data[0].url / data[0].b64_json
+    if let Some(first) = body["data"].as_array().and_then(|a| a.first()) {
+        if let Some(u) = first["url"].as_str() {
+            if !u.is_empty() {
+                return Some(u.to_string());
+            }
+        }
+        if let Some(b64) = first["b64_json"].as_str() {
+            if !b64.is_empty() {
+                return Some(format!("data:image/png;base64,{b64}"));
+            }
+        }
+    }
+    None
+}
+
+fn find_data_url(s: &str) -> Option<String> {
+    let idx = s.find("data:image/")?;
+    let rest = &s[idx..];
+    let end = rest
+        .find(|c: char| c.is_whitespace() || c == ')' || c == '"' || c == '\'')
+        .unwrap_or(rest.len());
+    Some(rest[..end].to_string())
+}
+
+const DRAFT_SYSTEM_PROMPT: &str =
+    "You are an academic writing assistant. Write a coherent, well-structured first draft on the user's \
+     theme. Organise it with Markdown ATX headings to show the document structure — '#' for chapter-level \
+     headings, '##' for sections, '###' for subsections — and write the body as clear prose paragraphs \
+     separated by blank lines. Order the material logically (e.g. introduction, development, conclusion). \
+     Do NOT restate the theme verbatim as the very first line, and do NOT use bullet lists, tables, code \
+     fences, or any commentary — output ONLY the draft itself (headings and paragraphs).";
+
 /// Generate a structured first draft (Markdown headings + paragraphs) on a theme.
 pub async fn generate_draft(config: &LlmConfig, theme: &str) -> AppResult<String> {
     let provider = OpenRouterProvider::new(config.clone());
-    let system = "You are an academic writing assistant. Write a coherent, well-structured first draft on \
-         the user's theme. Organise it with Markdown ATX headings to show the document structure — '#' for \
-         chapter-level headings, '##' for sections, '###' for subsections — and write the body as clear \
-         prose paragraphs separated by blank lines. Order the material logically (e.g. introduction, \
-         development, conclusion). Do NOT restate the theme verbatim as the very first line, and do NOT use \
-         bullet lists, tables, code fences, or any commentary — output ONLY the draft itself (headings and \
-         paragraphs).";
-    provider.complete(system, theme.trim()).await
+    provider.complete(DRAFT_SYSTEM_PROMPT, theme.trim()).await
+}
+
+/// Stream a draft, invoking `on_delta` with the full accumulated text as it grows.
+pub async fn generate_draft_stream<F: FnMut(&str)>(
+    config: &LlmConfig,
+    theme: &str,
+    on_delta: F,
+) -> AppResult<String> {
+    let provider = OpenRouterProvider::new(config.clone());
+    provider
+        .complete_stream(DRAFT_SYSTEM_PROMPT, theme.trim(), on_delta)
+        .await
 }
 
 fn extract_json(s: &str) -> &str {
@@ -342,7 +519,7 @@ pub async fn analyze_document(config: &LlmConfig, doc: &Document) -> AppResult<A
         if chunk.metadata.chunk_type != CHUNK_TYPE_TEXT {
             continue;
         }
-        let snippet: String = chunk.content.chars().take(600).collect();
+        let snippet: String = chunk.content.chars().take(800).collect();
         if snippet.trim().is_empty() {
             continue;
         }
@@ -354,18 +531,42 @@ pub async fn analyze_document(config: &LlmConfig, doc: &Document) -> AppResult<A
     }
 
     let system = "You are a discourse-analysis engine for academic writing. Given a list of paragraphs \
-         (each with an id), identify the logical relationships between them (e.g. cause/effect, \
-         claim/evidence, premise/conclusion, elaboration, contrast). Respond with STRICT JSON only, no \
-         markdown, of the exact shape: \
-         {\"nodes\":[{\"id\":\"<paragraph id>\",\"label\":\"<3-6 word topic>\",\"summary\":\"<one sentence>\"}],\
-         \"edges\":[{\"source\":\"<id>\",\"target\":\"<id>\",\"relation\":\"<short relation label>\"}]}. \
-         Use ONLY the provided ids. Include every paragraph as a node.";
+         (each with an id), build a relationship network at TWO levels.\n\
+         1) PARAGRAPH nodes: one per provided paragraph. Set kind=\"paragraph\", id = the paragraph id, \
+         label = a 3-6 word topic, summary = one sentence.\n\
+         2) SENTENCE nodes: split each paragraph into its sentences and create one node per sentence. Set \
+         kind=\"sentence\", parent = the owning paragraph id, id = \"<paragraphId>#s<n>\" (n starts at 1 per \
+         paragraph), label = a 3-6 word gist, summary = the sentence text.\n\
+         Then add EDGES describing the logical relationship between nodes — between paragraphs, between \
+         sentences, and across levels where relevant. Each edge MUST set \"relation\" to the relationship \
+         type as a property (e.g. cause, effect, evidence, claim, elaboration, contrast, condition, \
+         example, definition, sequence).\n\
+         Respond with STRICT JSON only, no markdown, of the exact shape: \
+         {\"nodes\":[{\"id\":\"...\",\"kind\":\"paragraph|sentence\",\"parent\":\"<paragraph id or omit>\",\
+         \"label\":\"...\",\"summary\":\"...\"}],\
+         \"edges\":[{\"source\":\"<id>\",\"target\":\"<id>\",\"relation\":\"<type>\"}]}. \
+         Use ONLY the provided paragraph ids (and the \"<paragraphId>#s<n>\" form for sentences). Keep \
+         labels short.";
 
     let user = format!("Paragraphs:\n{listing}");
     let raw = provider.complete(system, &user).await?;
     let json_str = extract_json(&raw);
-    let result: AnalysisResult = serde_json::from_str(json_str).map_err(|e| {
+    let mut result: AnalysisResult = serde_json::from_str(json_str).map_err(|e| {
         AppError::Other(format!("Could not parse analysis JSON from model: {e}"))
     })?;
+
+    // Default any node the model left without a kind to "paragraph", and drop
+    // edges whose endpoints aren't real nodes (keeps the graph consistent).
+    for n in result.nodes.iter_mut() {
+        if n.kind.trim().is_empty() {
+            n.kind = "paragraph".to_string();
+        }
+    }
+    let node_ids: std::collections::HashSet<&str> =
+        result.nodes.iter().map(|n| n.id.as_str()).collect();
+    result
+        .edges
+        .retain(|e| node_ids.contains(e.source.as_str()) && node_ids.contains(e.target.as_str()));
+
     Ok(result)
 }

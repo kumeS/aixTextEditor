@@ -2,7 +2,7 @@
 // temperature, and the API key (stored in the OS keychain via Rust — never
 // echoed back to the frontend).
 
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { api } from "../api";
 import { useStore } from "../store";
 import type { Settings } from "../types";
@@ -17,16 +17,40 @@ const DEFAULTS: Settings = {
     "meta-llama/llama-3.3-70b-instruct:free",
     "deepseek/deepseek-r1:free",
   ],
+  imageModel: "google/gemini-2.5-flash-image",
+  imageModels: [
+    "google/gemini-2.5-flash-image",
+    "google/gemini-3-pro-image-preview",
+  ],
   defaultTargetLanguage: "English",
   temperature: 0.3,
 };
 
-/** Ensure the active model always appears in the selectable list. */
-function withActiveModel(s: Settings): Settings {
+// Common target languages for the default-translation picker.
+const LANGUAGES = [
+  "English",
+  "日本語",
+  "中文",
+  "한국어",
+  "Español",
+  "Français",
+  "Deutsch",
+  "Português",
+  "Italiano",
+  "Русский",
+  "العربية",
+];
+
+/** Ensure each active model always appears in its selectable list. */
+function withActiveModels(s: Settings): Settings {
   const models = s.models?.length ? s.models : DEFAULTS.models;
+  const imageModels = s.imageModels?.length ? s.imageModels : DEFAULTS.imageModels;
   return {
     ...s,
     models: models.includes(s.model) ? models : [s.model, ...models],
+    imageModels: imageModels.includes(s.imageModel)
+      ? imageModels
+      : [s.imageModel, ...imageModels],
   };
 }
 
@@ -39,16 +63,18 @@ export default function SettingsModal() {
   const setHasApiKey = useStore((s) => s.setHasApiKey);
   const notify = useStore((s) => s.notify);
 
-  const [form, setForm] = useState<Settings>(withActiveModel(storedSettings ?? DEFAULTS));
+  const [form, setForm] = useState<Settings>(withActiveModels(storedSettings ?? DEFAULTS));
   const [apiKey, setApiKey] = useState("");
   const [newModel, setNewModel] = useState("");
+  const [newImageModel, setNewImageModel] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (open) {
-      setForm(withActiveModel(storedSettings ?? DEFAULTS));
+      setForm(withActiveModels(storedSettings ?? DEFAULTS));
       setApiKey("");
       setNewModel("");
+      setNewImageModel("");
     }
   }, [open, storedSettings]);
 
@@ -57,22 +83,27 @@ export default function SettingsModal() {
   const update = <K extends keyof Settings>(key: K, value: Settings[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
 
-  const addModel = () => {
-    const id = newModel.trim();
+  // Generic add/remove that works on either model list (text or image).
+  type ListKey = "models" | "imageModels";
+  type ActiveKey = "model" | "imageModel";
+  const addModelTo = (listKey: ListKey, activeKey: ActiveKey, raw: string) => {
+    const id = raw.trim();
     if (!id) return;
     setForm((f) => ({
       ...f,
-      models: f.models.includes(id) ? f.models : [...f.models, id],
-      model: id, // select the newly added model
+      [listKey]: f[listKey].includes(id) ? f[listKey] : [...f[listKey], id],
+      [activeKey]: id, // select the newly added model
     }));
-    setNewModel("");
   };
-
-  const removeModel = (id: string) => {
+  const removeModelFrom = (listKey: ListKey, activeKey: ActiveKey, id: string) => {
     setForm((f) => {
-      const models = f.models.filter((m) => m !== id);
-      const safe = models.length ? models : [DEFAULTS.model];
-      return { ...f, models: safe, model: f.model === id ? safe[0] : f.model };
+      const list = f[listKey].filter((m) => m !== id);
+      const safe = list.length ? list : [f[activeKey]];
+      return {
+        ...f,
+        [listKey]: safe,
+        [activeKey]: f[activeKey] === id ? safe[0] : f[activeKey],
+      };
     });
   };
 
@@ -107,6 +138,82 @@ export default function SettingsModal() {
 
   const field = "w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-accent";
   const labelCls = "mb-1 block text-sm font-medium text-ink-soft";
+
+  // Shared renderer for a selectable, editable model list (text or image).
+  const renderModelList = (
+    listKey: ListKey,
+    activeKey: ActiveKey,
+    addValue: string,
+    setAddValue: (v: string) => void,
+    placeholder: string,
+    help: ReactNode
+  ) => {
+    const list = form[listKey];
+    const active = form[activeKey];
+    const add = () => {
+      addModelTo(listKey, activeKey, addValue);
+      setAddValue("");
+    };
+    return (
+      <>
+        <div className="max-h-40 space-y-0.5 overflow-auto rounded-md border border-gray-300 p-1">
+          {list.map((m) => {
+            const isActive = active === m;
+            return (
+              <div key={m} className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => update(activeKey, m)}
+                  className={`flex-1 truncate rounded px-2 py-1.5 text-left text-sm ${
+                    isActive
+                      ? "bg-accent/10 font-medium text-accent"
+                      : "text-ink-soft hover:bg-gray-100"
+                  }`}
+                  title={m}
+                >
+                  <span className="mr-1 inline-block w-3">{isActive ? "✓" : ""}</span>
+                  {m}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeModelFrom(listKey, activeKey, m)}
+                  disabled={list.length <= 1}
+                  className="shrink-0 rounded px-1.5 text-ink-faint hover:text-red-500 disabled:opacity-30 disabled:hover:text-ink-faint"
+                  title="Remove from list"
+                  aria-label={`Remove ${m}`}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-2 flex gap-2">
+          <input
+            value={addValue}
+            onChange={(e) => setAddValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                add();
+              }
+            }}
+            placeholder={placeholder}
+            className={field}
+          />
+          <button
+            type="button"
+            onClick={add}
+            disabled={!addValue.trim()}
+            className="shrink-0 rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-soft disabled:opacity-50"
+          >
+            Add
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-ink-faint">{help}</p>
+      </>
+    );
+  };
 
   return (
     <div
@@ -171,79 +278,59 @@ export default function SettingsModal() {
           </div>
 
           <div>
-            <label className={labelCls}>Model</label>
-            <div className="max-h-44 space-y-0.5 overflow-auto rounded-md border border-gray-300 p-1">
-              {form.models.map((m) => {
-                const active = form.model === m;
-                return (
-                  <div key={m} className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => update("model", m)}
-                      className={`flex-1 truncate rounded px-2 py-1.5 text-left text-sm ${
-                        active
-                          ? "bg-accent/10 font-medium text-accent"
-                          : "text-ink-soft hover:bg-gray-100"
-                      }`}
-                      title={m}
-                    >
-                      <span className="mr-1 inline-block w-3">
-                        {active ? "✓" : ""}
-                      </span>
-                      {m}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeModel(m)}
-                      disabled={form.models.length <= 1}
-                      className="shrink-0 rounded px-1.5 text-ink-faint hover:text-red-500 disabled:opacity-30 disabled:hover:text-ink-faint"
-                      title="Remove from list"
-                      aria-label={`Remove ${m}`}
-                    >
-                      ×
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="mt-2 flex gap-2">
-              <input
-                value={newModel}
-                onChange={(e) => setNewModel(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addModel();
-                  }
-                }}
-                placeholder="Add model ID, e.g. anthropic/claude-3.5-sonnet"
-                className={field}
-              />
-              <button
-                type="button"
-                onClick={addModel}
-                disabled={!newModel.trim()}
-                className="shrink-0 rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-soft disabled:opacity-50"
-              >
-                Add
-              </button>
-            </div>
-            <p className="mt-1 text-xs text-ink-faint">
-              Click a model to use it. Add any OpenRouter model — free (e.g.{" "}
-              <code>google/gemma-4-31b-it:free</code>) or paid (e.g.{" "}
-              <code>anthropic/claude-3.5-sonnet</code>). Find current IDs at
-              openrouter.ai/models.
-            </p>
+            <label className={labelCls}>Model (text)</label>
+            {renderModelList(
+              "models",
+              "model",
+              newModel,
+              setNewModel,
+              "Add model ID, e.g. anthropic/claude-3.5-sonnet",
+              <>
+                Click a model to use it for writing/AI actions. Add any OpenRouter
+                text model — free (e.g. <code>google/gemma-4-31b-it:free</code>) or
+                paid (e.g. <code>anthropic/claude-3.5-sonnet</code>).
+              </>
+            )}
+          </div>
+
+          <div>
+            <label className={labelCls}>Model (image generation)</label>
+            {renderModelList(
+              "imageModels",
+              "imageModel",
+              newImageModel,
+              setNewImageModel,
+              "Add image model ID, e.g. google/gemini-2.5-flash-image",
+              <>
+                Used for paragraph image generation. e.g.{" "}
+                <code>google/gemini-2.5-flash-image</code> (Nano Banana) or
+                Nano Banana Pro. <strong>Verify exact ids on
+                openrouter.ai/models</strong> — image model ids change often.
+              </>
+            )}
           </div>
 
           <div className="flex gap-4">
             <div className="flex-1">
               <label className={labelCls}>Default translation language</label>
-              <input
+              <select
                 value={form.defaultTargetLanguage}
                 onChange={(e) => update("defaultTargetLanguage", e.target.value)}
                 className={field}
-              />
+              >
+                {/* Keep a custom stored value selectable if it isn't in the list. */}
+                {!LANGUAGES.includes(form.defaultTargetLanguage) &&
+                  form.defaultTargetLanguage && (
+                    <option value={form.defaultTargetLanguage}>
+                      {form.defaultTargetLanguage}
+                    </option>
+                  )}
+                {LANGUAGES.map((l) => (
+                  <option key={l} value={l}>
+                    {l}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="w-40">
               <label className={labelCls}>

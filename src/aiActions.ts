@@ -114,6 +114,68 @@ export async function generateDiagramFromChunk(
   }
 }
 
+/** Generate an image from one paragraph and insert it as an image chunk below. */
+export async function generateImageFromChunk(chunkId: string): Promise<void> {
+  const s = useStore.getState();
+  const chunk = s.doc.chunks.find((c) => c.id === chunkId);
+  if (!chunk || !chunk.content.trim()) {
+    s.notify("This paragraph is empty.", "info");
+    return;
+  }
+  if (!s.hasApiKey) {
+    s.notify("Set your OpenRouter API key in Settings first.", "error");
+    s.openSettings();
+    return;
+  }
+  s.setBusyChunk(chunkId, true);
+  try {
+    const url = await api.aiGenerateImage(chunk.content);
+    useStore.getState().insertImageAfter(chunkId, url, chunk.content.slice(0, 200));
+    s.notify("Image generated below the paragraph.", "success");
+  } catch (e) {
+    s.notify(message(e), "error");
+  } finally {
+    useStore.getState().setBusyChunk(chunkId, false);
+  }
+}
+
+/** Generate one image from all currently selected paragraphs (combined prompt). */
+export async function generateImageFromSelection(): Promise<void> {
+  const s = useStore.getState();
+  const ids = s.selectedChunkIds;
+  if (ids.length === 0) return;
+  if (!s.hasApiKey) {
+    s.notify("Set your OpenRouter API key in Settings first.", "error");
+    s.openSettings();
+    return;
+  }
+  const selectedInOrder = s.doc.chunks.filter((c) => ids.includes(c.id));
+  const prompt = selectedInOrder
+    .filter(
+      (c) =>
+        c.metadata.chunkType === "text" || c.metadata.chunkType === "heading"
+    )
+    .map((c) => c.content)
+    .join("\n\n")
+    .trim();
+  if (!prompt) {
+    s.notify("Select one or more text paragraphs first.", "info");
+    return;
+  }
+  const insertAfterId = selectedInOrder[selectedInOrder.length - 1]?.id ?? null;
+  s.setGlobalBusy("Generating image…");
+  try {
+    const url = await api.aiGenerateImage(prompt);
+    useStore.getState().insertImageAfter(insertAfterId, url, prompt.slice(0, 200));
+    useStore.getState().clearSelection();
+    s.notify("Image generated from selection.", "success");
+  } catch (e) {
+    s.notify(message(e), "error");
+  } finally {
+    useStore.getState().setGlobalBusy(null);
+  }
+}
+
 /** Analyze the whole document and open the relationship network panel. */
 export async function analyzeDocument(): Promise<void> {
   const s = useStore.getState();

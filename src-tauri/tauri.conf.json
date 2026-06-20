@@ -28,6 +28,8 @@
     "active": true,
     "targets": "all",
     "category": "Productivity",
+    "copyright": "Copyright (c) 2026 Satoshi Kume. Released under the Artistic License 2.0.",
+    "licenseFile": "../LICENSE",
     "shortDescription": "LLM-augmented chunk-based editor for papers and reports.",
     "longDescription": "AIX Text Editor manages documents as paragraph chunks and provides context-aware AI assistance (translate, proofread, diagram generation, and relationship analysis) via OpenRouter.",
     "icon": [
