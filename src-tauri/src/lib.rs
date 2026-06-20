@@ -1,4 +1,4 @@
-//! AIX Text Editor — Tauri backend entry point.
+//! aixTextEditor — Tauri backend entry point.
 
 mod ai;
 mod commands;

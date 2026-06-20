@@ -221,10 +221,10 @@ export default function SettingsModal() {
       onMouseDown={closeSettings}
     >
       <div
-        className="w-full max-w-lg rounded-xl bg-white p-6 shadow-2xl"
+        className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-xl bg-white shadow-2xl"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-center justify-between">
+        <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-6 pb-3 pt-6">
           <h2 className="text-lg font-semibold text-ink">Settings</h2>
           <button
             onClick={closeSettings}
@@ -235,7 +235,7 @@ export default function SettingsModal() {
           </button>
         </div>
 
-        <div className="space-y-4">
+        <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
           <div>
             <label className={labelCls}>OpenRouter API key</label>
             <input
@@ -349,7 +349,7 @@ export default function SettingsModal() {
           </div>
         </div>
 
-        <div className="mt-6 flex justify-end gap-2">
+        <div className="flex shrink-0 justify-end gap-2 border-t border-gray-100 px-6 py-4">
           <button
             onClick={closeSettings}
             className="rounded-md px-4 py-2 text-sm text-ink-soft hover:bg-gray-100"

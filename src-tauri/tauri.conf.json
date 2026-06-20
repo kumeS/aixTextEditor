@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "AIX Text Editor",
+  "productName": "aixTextEditor",
   "version": "1.0.0",
   "identifier": "com.aix.texteditor",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "AIX Text Editor",
+        "title": "aixTextEditor",
         "width": 1280,
         "height": 860,
         "minWidth": 800,
@@ -31,7 +31,7 @@
     "copyright": "Copyright (c) 2026 Satoshi Kume. Released under the Artistic License 2.0.",
     "licenseFile": "../LICENSE",
     "shortDescription": "LLM-augmented chunk-based editor for papers and reports.",
-    "longDescription": "AIX Text Editor manages documents as paragraph chunks and provides context-aware AI assistance (translate, proofread, diagram generation, and relationship analysis) via OpenRouter.",
+    "longDescription": "aixTextEditor manages documents as paragraph chunks and provides context-aware AI assistance (translate, proofread, diagram generation, and relationship analysis) via OpenRouter.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "AIX Text Editor — an LLM-augmented, chunk-based editor for academic papers and long-form reports.",
+  "description": "aixTextEditor — an LLM-augmented, chunk-based editor for academic papers and long-form reports.",
   "author": "Satoshi Kume",
   "license": "Artistic-2.0",
   "scripts": {

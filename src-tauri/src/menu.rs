@@ -13,9 +13,9 @@ use tauri::{App, Runtime};
 pub fn build<R: Runtime>(app: &App<R>) -> tauri::Result<Menu<R>> {
     // App menu (shows as the app menu on macOS).
     let settings = MenuItemBuilder::with_id("settings", "Settings…").build(app)?;
-    let app_menu = SubmenuBuilder::new(app, "AIX Text Editor")
+    let app_menu = SubmenuBuilder::new(app, "aixTextEditor")
         .about(Some(AboutMetadata {
-            name: Some("AIX Text Editor".into()),
+            name: Some("aixTextEditor".into()),
             version: Some(env!("CARGO_PKG_VERSION").into()),
             copyright: Some(
                 "Copyright (c) 2026 Satoshi Kume. Artistic License 2.0.".into(),

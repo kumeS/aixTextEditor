@@ -1,4 +1,4 @@
-# AIX Text Editor
+# aixTextEditor
 
 An LLM-augmented, **chunk-based** text editor for academic papers and long-form
 reports. Each paragraph is an independent "chunk" (like a Jupyter cell), so AI
@@ -123,7 +123,7 @@ brew install --cask aix-text-editor
 
 Because the build is currently unsigned/un-notarized, Gatekeeper quarantines it;
 either notarize the build or run
-`xattr -dr com.apple.quarantine "/Applications/AIX Text Editor.app"`.
+`xattr -dr com.apple.quarantine "/Applications/aixTextEditor.app"`.
 
 ## Notes & limitations
 

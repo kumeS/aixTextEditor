@@ -65,7 +65,7 @@ impl LlmProvider for OpenRouterProvider {
                 .header("Authorization", format!("Bearer {}", self.config.api_key))
                 // OpenRouter attribution headers (optional but recommended).
                 .header("HTTP-Referer", "https://github.com/kumeS/AIX_Text_Editor")
-                .header("X-Title", "AIX Text Editor")
+                .header("X-Title", "aixTextEditor")
                 .json(&payload)
                 .send()
                 .await?;
@@ -144,7 +144,7 @@ impl OpenRouterProvider {
             .post(&self.config.endpoint)
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .header("HTTP-Referer", "https://github.com/kumeS/AIX_Text_Editor")
-            .header("X-Title", "AIX Text Editor")
+            .header("X-Title", "aixTextEditor")
             .json(&json!({
                 "model": self.config.model,
                 "temperature": self.config.temperature,
@@ -380,7 +380,7 @@ pub async fn generate_image(config: &LlmConfig, prompt: &str) -> AppResult<Strin
         .post(&config.endpoint)
         .header("Authorization", format!("Bearer {}", config.api_key))
         .header("HTTP-Referer", "https://github.com/kumeS/AIX_Text_Editor")
-        .header("X-Title", "AIX Text Editor")
+        .header("X-Title", "aixTextEditor")
         .json(&json!({
             "model": config.model,
             "messages": [{ "role": "user", "content": prompt }],
