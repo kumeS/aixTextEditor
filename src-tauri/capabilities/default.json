@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capabilities for the main editor window. File contents are read/written by the app's own Rust commands (std::fs); the dialog plugin is only used to let the user pick paths.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "dialog:default",
+    "dialog:allow-confirm"
+  ]
+}
