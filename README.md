@@ -172,6 +172,27 @@ npm run tauri build    # → .dmg (macOS), .msi/.exe (Windows), etc.
 The application icon is generated from a source image with
 `npm run tauri icon <path-to-1024px-png>`.
 
+### Installing a downloaded `.dmg` (macOS)
+
+The released build is **ad-hoc signed and not notarized** (it ships without a paid
+Apple Developer ID). macOS attaches a *quarantine* flag to anything downloaded from
+the internet, so on first launch Gatekeeper blocks it with
+**"aixTextEditor is damaged and can't be opened"** (or *"Apple could not verify…"*).
+The app is **not** actually damaged — this is expected for an unsigned build.
+
+To open it, clear the quarantine flag after installing:
+
+```bash
+# Open the .dmg, drag aixTextEditor into /Applications, then run:
+xattr -dr com.apple.quarantine "/Applications/aixTextEditor.app"
+
+# If macOS even refuses to open the .dmg itself, clear it first:
+xattr -dr com.apple.quarantine ~/Downloads/aixTextEditor_*.dmg
+```
+
+You only need to do this once per install. To remove the step entirely, build with
+an Apple Developer ID and notarize the bundle (see `.github/workflows/release.yml`).
+
 ### Homebrew (macOS)
 
 A cask template lives at [`Casks/aix-text-editor.rb`](Casks/aix-text-editor.rb).
