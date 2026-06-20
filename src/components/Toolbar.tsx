@@ -2,8 +2,9 @@
 // and settings. Kept visually quiet to honour the "Clarity & Simplicity" goal.
 
 import { useEffect, useRef, useState } from "react";
-import { analyzeDocument, translateDocument } from "../aiActions";
+import { analyzeDocument } from "../aiActions";
 import {
+  draftDocument,
   exportDocument,
   importDocument,
   newDocument,
@@ -14,11 +15,11 @@ import { useStore } from "../store";
 import type { ExportFormat } from "../types";
 import { promptDialog } from "./PromptModal";
 import {
+  DraftIcon,
   ExportIcon,
   FileIcon,
   FolderIcon,
   ImportIcon,
-  LanguagesIcon,
   NetworkIcon,
   SaveIcon,
   SettingsIcon,
@@ -61,9 +62,6 @@ export default function Toolbar() {
   const openSettings = useStore((s) => s.openSettings);
   const toggleNetwork = useStore((s) => s.toggleNetwork);
   const networkOpen = useStore((s) => s.networkOpen);
-  const defaultLang = useStore(
-    (s) => s.settings?.defaultTargetLanguage ?? "English"
-  );
 
   const [exportOpen, setExportOpen] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
@@ -86,15 +84,15 @@ export default function Toolbar() {
     void exportDocument(fmt);
   };
 
-  const onTranslateDoc = async () => {
-    const lang = await promptDialog({
-      title: "Translate document",
-      label: "Target language",
-      defaultValue: defaultLang,
-      placeholder: "e.g. English, 日本語, Français",
-      submitLabel: "Translate",
+  const onDraft = async () => {
+    const theme = await promptDialog({
+      title: "Draft a document",
+      label: "What theme / topic should I draft about?",
+      placeholder: "e.g. The role of attention mechanisms in NLP",
+      multiline: true,
+      submitLabel: "Draft",
     });
-    if (lang) void translateDocument(lang);
+    if (theme && theme.trim()) void draftDocument(theme);
   };
 
   return (
@@ -145,11 +143,11 @@ export default function Toolbar() {
       <div className="mx-1 h-5 w-px bg-gray-200" />
 
       <ToolButton
-        onClick={() => void onTranslateDoc()}
-        title="Translate the whole document"
+        onClick={() => void onDraft()}
+        title="Draft a new document from a theme (AI)"
         disabled={!!globalBusy}
       >
-        <LanguagesIcon /> Translate
+        <DraftIcon /> Draft
       </ToolButton>
 
       <ToolButton

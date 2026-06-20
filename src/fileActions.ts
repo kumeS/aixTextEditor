@@ -37,6 +37,30 @@ export async function newDocument(): Promise<void> {
   }
 }
 
+/** Generate a fresh document draft on a theme (replaces the current document). */
+export async function draftDocument(theme: string): Promise<void> {
+  const s = useStore.getState();
+  if (!s.hasApiKey) {
+    s.notify("Set your OpenRouter API key in Settings first.", "error");
+    s.openSettings();
+    return;
+  }
+  if (!theme.trim()) return;
+  if (!(await confirmDiscardIfDirty())) return;
+  s.setGlobalBusy("Drafting…");
+  try {
+    const doc = await api.aiDraft(theme.trim());
+    useStore.getState().loadDocument(doc, null);
+    useStore
+      .getState()
+      .notify(`Draft created — ${doc.chunks.length} chunks.`, "success");
+  } catch (e) {
+    useStore.getState().notify(message(e), "error");
+  } finally {
+    useStore.getState().setGlobalBusy(null);
+  }
+}
+
 export async function importDocument(): Promise<void> {
   if (!(await confirmDiscardIfDirty())) return;
   try {

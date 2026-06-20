@@ -73,6 +73,25 @@ pub fn export_to_path(doc: &Document, path: &str, format: &str) -> AppResult<()>
 
 // ----- text <-> document ---------------------------------------------------
 
+/// Recognise an ATX Markdown heading (`#`–`######` followed by a space).
+/// Levels beyond 3 are clamped to 3. Returns `(level, heading text)`.
+fn parse_heading(line: &str) -> Option<(u8, String)> {
+    let hashes = line.chars().take_while(|&c| c == '#').count();
+    if hashes == 0 || hashes > 6 {
+        return None;
+    }
+    let rest = &line[hashes..];
+    // ATX rule: the run of hashes must be followed by a space/tab.
+    if !rest.starts_with(' ') && !rest.starts_with('\t') {
+        return None;
+    }
+    let text = rest.trim();
+    if text.is_empty() {
+        return None;
+    }
+    Some((hashes.min(3) as u8, text.to_string()))
+}
+
 /// Split plain text / markdown into chunks. Blank lines separate paragraphs;
 /// fenced ```mermaid blocks become diagram chunks; other fenced code blocks are
 /// preserved verbatim as text chunks.
@@ -132,6 +151,15 @@ pub fn text_to_document(title: &str, text: &str) -> Document {
             continue;
         }
 
+        // A Markdown heading becomes its own chunk (chapter/section divider).
+        if let Some((level, heading)) = parse_heading(trimmed) {
+            flush_para(&mut para, &mut order, &mut doc);
+            doc.chunks.push(Chunk::new_heading(order, level, heading));
+            order += 1;
+            i += 1;
+            continue;
+        }
+
         if line.trim().is_empty() {
             flush_para(&mut para, &mut order, &mut doc);
         } else {
@@ -148,7 +176,15 @@ pub fn text_to_document(title: &str, text: &str) -> Document {
     doc
 }
 
+fn heading_prefix(chunk: &Chunk) -> String {
+    let level = chunk.metadata.level.unwrap_or(1).clamp(1, 3) as usize;
+    "#".repeat(level)
+}
+
 fn chunk_as_markdown(chunk: &Chunk) -> String {
+    if chunk.is_heading() {
+        return format!("{} {}", heading_prefix(chunk), chunk.content.trim());
+    }
     if chunk.is_diagram() {
         let fmt = chunk
             .metadata
@@ -186,7 +222,13 @@ fn document_to_txt(doc: &Document) -> String {
     let body = doc
         .chunks
         .iter()
-        .map(|c| c.content.clone())
+        .map(|c| {
+            if c.is_heading() {
+                format!("{} {}", heading_prefix(c), c.content.trim())
+            } else {
+                c.content.clone()
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n\n");
     out.push_str(&body);
@@ -459,7 +501,17 @@ fn document_to_rtf(doc: &Document) -> String {
         if idx > 0 {
             out.push_str("\\par\n");
         }
-        if chunk.is_diagram() {
+        if chunk.is_heading() {
+            // Bold, size by level.
+            let fs = match chunk.metadata.level.unwrap_or(1).clamp(1, 3) {
+                1 => 34,
+                2 => 28,
+                _ => 24,
+            };
+            out.push_str(&format!("{{\\b\\fs{fs} "));
+            out.push_str(&rtf_escape(chunk.content.trim()));
+            out.push_str("}\\par\n");
+        } else if chunk.is_diagram() {
             // Diagram code is rendered as monospace text in RTF exports.
             out.push_str("{\\f1\\fs20 ");
             out.push_str(&rtf_escape(&chunk.content));
@@ -477,7 +529,7 @@ fn document_to_rtf(doc: &Document) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{CHUNK_TYPE_DIAGRAM, CHUNK_TYPE_TEXT};
+    use crate::models::{CHUNK_TYPE_DIAGRAM, CHUNK_TYPE_HEADING, CHUNK_TYPE_TEXT};
 
     #[test]
     fn splits_paragraphs_on_blank_lines() {
@@ -592,6 +644,44 @@ mod tests {
         );
         // A level-2 heading is body, not a title.
         assert_eq!(strip_leading_h1("## Section\n\nBody."), None);
+    }
+
+    #[test]
+    fn headings_become_their_own_chunks() {
+        let md = "# Chapter One\n\nIntro paragraph.\n\n## Section A\n\nBody of A.\n\n### Sub\n\nDeep.";
+        let doc = text_to_document("T", md);
+        assert_eq!(doc.chunks.len(), 6, "chunks: {:?}", doc.chunks);
+        assert_eq!(doc.chunks[0].metadata.chunk_type, CHUNK_TYPE_HEADING);
+        assert_eq!(doc.chunks[0].metadata.level, Some(1));
+        assert_eq!(doc.chunks[0].content, "Chapter One");
+        assert_eq!(doc.chunks[1].metadata.chunk_type, CHUNK_TYPE_TEXT);
+        assert_eq!(doc.chunks[1].content, "Intro paragraph.");
+        assert_eq!(doc.chunks[2].metadata.level, Some(2));
+        assert_eq!(doc.chunks[2].content, "Section A");
+        assert_eq!(doc.chunks[4].metadata.level, Some(3));
+        assert_eq!(doc.chunks[4].content, "Sub");
+    }
+
+    #[test]
+    fn hash_without_space_is_body_and_deep_levels_clamp() {
+        let doc = text_to_document("T", "#nospace stays body\n\n#### deep heading");
+        assert_eq!(doc.chunks[0].metadata.chunk_type, CHUNK_TYPE_TEXT);
+        assert_eq!(doc.chunks[1].metadata.chunk_type, CHUNK_TYPE_HEADING);
+        assert_eq!(doc.chunks[1].metadata.level, Some(3)); // #### clamps to 3
+    }
+
+    #[test]
+    fn export_md_renders_heading_chunks_and_roundtrips() {
+        let mut doc = Document::new("Doc");
+        doc.chunks.push(Chunk::new_heading(0, 2, "Methods"));
+        doc.chunks.push(Chunk::new_text(1, "We did things."));
+        let md = document_to_md(&doc);
+        assert!(md.contains("## Methods"), "got: {md}");
+        let re = text_to_document("Doc", &md);
+        assert!(re
+            .chunks
+            .iter()
+            .any(|c| c.is_heading() && c.content == "Methods" && c.metadata.level == Some(2)));
     }
 
     #[test]

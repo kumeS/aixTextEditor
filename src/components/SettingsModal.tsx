@@ -10,10 +10,25 @@ import { CloseIcon } from "./icons";
 
 const DEFAULTS: Settings = {
   endpoint: "https://openrouter.ai/api/v1/chat/completions",
-  model: "google/gemma-2-9b-it:free",
+  model: "google/gemma-4-31b-it:free",
+  models: [
+    "google/gemma-4-31b-it:free",
+    "google/gemma-2-9b-it:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "deepseek/deepseek-r1:free",
+  ],
   defaultTargetLanguage: "English",
   temperature: 0.3,
 };
+
+/** Ensure the active model always appears in the selectable list. */
+function withActiveModel(s: Settings): Settings {
+  const models = s.models?.length ? s.models : DEFAULTS.models;
+  return {
+    ...s,
+    models: models.includes(s.model) ? models : [s.model, ...models],
+  };
+}
 
 export default function SettingsModal() {
   const open = useStore((s) => s.settingsOpen);
@@ -24,14 +39,16 @@ export default function SettingsModal() {
   const setHasApiKey = useStore((s) => s.setHasApiKey);
   const notify = useStore((s) => s.notify);
 
-  const [form, setForm] = useState<Settings>(storedSettings ?? DEFAULTS);
+  const [form, setForm] = useState<Settings>(withActiveModel(storedSettings ?? DEFAULTS));
   const [apiKey, setApiKey] = useState("");
+  const [newModel, setNewModel] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (open) {
-      setForm(storedSettings ?? DEFAULTS);
+      setForm(withActiveModel(storedSettings ?? DEFAULTS));
       setApiKey("");
+      setNewModel("");
     }
   }, [open, storedSettings]);
 
@@ -39,6 +56,25 @@ export default function SettingsModal() {
 
   const update = <K extends keyof Settings>(key: K, value: Settings[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
+
+  const addModel = () => {
+    const id = newModel.trim();
+    if (!id) return;
+    setForm((f) => ({
+      ...f,
+      models: f.models.includes(id) ? f.models : [...f.models, id],
+      model: id, // select the newly added model
+    }));
+    setNewModel("");
+  };
+
+  const removeModel = (id: string) => {
+    setForm((f) => {
+      const models = f.models.filter((m) => m !== id);
+      const safe = models.length ? models : [DEFAULTS.model];
+      return { ...f, models: safe, model: f.model === id ? safe[0] : f.model };
+    });
+  };
 
   const save = async () => {
     setSaving(true);
@@ -136,16 +172,67 @@ export default function SettingsModal() {
 
           <div>
             <label className={labelCls}>Model</label>
-            <input
-              value={form.model}
-              onChange={(e) => update("model", e.target.value)}
-              className={field}
-              placeholder={DEFAULTS.model}
-            />
+            <div className="max-h-44 space-y-0.5 overflow-auto rounded-md border border-gray-300 p-1">
+              {form.models.map((m) => {
+                const active = form.model === m;
+                return (
+                  <div key={m} className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => update("model", m)}
+                      className={`flex-1 truncate rounded px-2 py-1.5 text-left text-sm ${
+                        active
+                          ? "bg-accent/10 font-medium text-accent"
+                          : "text-ink-soft hover:bg-gray-100"
+                      }`}
+                      title={m}
+                    >
+                      <span className="mr-1 inline-block w-3">
+                        {active ? "✓" : ""}
+                      </span>
+                      {m}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeModel(m)}
+                      disabled={form.models.length <= 1}
+                      className="shrink-0 rounded px-1.5 text-ink-faint hover:text-red-500 disabled:opacity-30 disabled:hover:text-ink-faint"
+                      title="Remove from list"
+                      aria-label={`Remove ${m}`}
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="mt-2 flex gap-2">
+              <input
+                value={newModel}
+                onChange={(e) => setNewModel(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addModel();
+                  }
+                }}
+                placeholder="Add model ID, e.g. anthropic/claude-3.5-sonnet"
+                className={field}
+              />
+              <button
+                type="button"
+                onClick={addModel}
+                disabled={!newModel.trim()}
+                className="shrink-0 rounded-md bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-soft disabled:opacity-50"
+              >
+                Add
+              </button>
+            </div>
             <p className="mt-1 text-xs text-ink-faint">
-              e.g. a free model like <code>google/gemma-2-9b-it:free</code>, or a
-              paid one like <code>anthropic/claude-3.5-sonnet</code>. Check
-              openrouter.ai/models for current ids.
+              Click a model to use it. Add any OpenRouter model — free (e.g.{" "}
+              <code>google/gemma-4-31b-it:free</code>) or paid (e.g.{" "}
+              <code>anthropic/claude-3.5-sonnet</code>). Find current IDs at
+              openrouter.ai/models.
             </p>
           </div>
 

@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 pub const CHUNK_TYPE_TEXT: &str = "text";
 pub const CHUNK_TYPE_DIAGRAM: &str = "diagram";
+pub const CHUNK_TYPE_HEADING: &str = "heading";
 pub const DIAGRAM_FORMAT_MERMAID: &str = "mermaid";
 
 /// Generate a fresh UUID v4 string id.
@@ -23,12 +24,15 @@ pub fn new_id() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChunkMetadata {
-    /// "text" or "diagram".
+    /// "text", "diagram", or "heading".
     #[serde(default = "default_chunk_type")]
     pub chunk_type: String,
     /// Diagram notation when `chunk_type == "diagram"` (e.g. "mermaid").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
+    /// Heading level (1–3) when `chunk_type == "heading"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub level: Option<u8>,
     /// One-line summary used by the relationship/network analysis.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
@@ -46,6 +50,7 @@ impl Default for ChunkMetadata {
         Self {
             chunk_type: default_chunk_type(),
             format: None,
+            level: None,
             summary: None,
             linked_chunks: Vec::new(),
         }
@@ -80,6 +85,23 @@ impl Chunk {
             metadata: ChunkMetadata {
                 chunk_type: CHUNK_TYPE_DIAGRAM.to_string(),
                 format: Some(format.into()),
+                level: None,
+                summary: None,
+                linked_chunks: Vec::new(),
+            },
+        }
+    }
+
+    /// A heading chunk (`# Title`). `level` is clamped to 1–3.
+    pub fn new_heading(order: u32, level: u8, text: impl Into<String>) -> Self {
+        Self {
+            id: new_id(),
+            order,
+            content: text.into(),
+            metadata: ChunkMetadata {
+                chunk_type: CHUNK_TYPE_HEADING.to_string(),
+                format: None,
+                level: Some(level.clamp(1, 3)),
                 summary: None,
                 linked_chunks: Vec::new(),
             },
@@ -88,6 +110,10 @@ impl Chunk {
 
     pub fn is_diagram(&self) -> bool {
         self.metadata.chunk_type == CHUNK_TYPE_DIAGRAM
+    }
+
+    pub fn is_heading(&self) -> bool {
+        self.metadata.chunk_type == CHUNK_TYPE_HEADING
     }
 }
 

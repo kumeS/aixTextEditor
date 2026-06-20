@@ -29,6 +29,7 @@ function emptyChunk(order: number, type: ChunkType = "text"): Chunk {
     metadata: {
       chunkType: type,
       format: type === "diagram" ? "mermaid" : undefined,
+      level: type === "heading" ? 2 : undefined,
       linkedChunks: [],
     },
   };
@@ -116,6 +117,8 @@ interface AppActions {
   replaceChunkContent: (id: string, content: string) => void; // undoable (AI results)
   setChunkSummary: (id: string, summary: string) => void;
   setChunkType: (id: string, type: ChunkType) => void;
+  setHeadingLevel: (id: string, level: number) => void;
+  convertToHeading: (id: string, level: number, content: string) => void;
 
   addChunkAfter: (id: string | null, type?: ChunkType) => string;
   insertDiagramAfter: (id: string | null, code: string) => string;
@@ -266,6 +269,41 @@ export const useStore = create<AppState & AppActions>((set, get) => {
                       type === "diagram"
                         ? c.metadata.format ?? "mermaid"
                         : undefined,
+                    level: type === "heading" ? c.metadata.level ?? 2 : undefined,
+                  },
+                }
+              : c
+          )
+        )
+      ),
+
+    setHeadingLevel: (id, level) =>
+      commit((doc) =>
+        mapChunks(doc, (chunks) =>
+          chunks.map((c) =>
+            c.id === id
+              ? {
+                  ...c,
+                  metadata: { ...c.metadata, chunkType: "heading", level },
+                }
+              : c
+          )
+        )
+      ),
+
+    convertToHeading: (id, level, content) =>
+      commit((doc) =>
+        mapChunks(doc, (chunks) =>
+          chunks.map((c) =>
+            c.id === id
+              ? {
+                  ...c,
+                  content,
+                  metadata: {
+                    ...c.metadata,
+                    chunkType: "heading",
+                    level: Math.min(Math.max(level, 1), 3),
+                    format: undefined,
                   },
                 }
               : c

@@ -12,6 +12,8 @@ interface PromptOptions {
   placeholder?: string;
   multiline?: boolean;
   submitLabel?: string;
+  /** Optional quick-pick chips. Clicking one resolves immediately with its value. */
+  presets?: { label: string; value: string }[];
 }
 
 type Resolver = (value: string | null) => void;
@@ -79,6 +81,20 @@ export function PromptHost() {
         </div>
         {opts.label && (
           <label className="mb-1 block text-sm text-ink-soft">{opts.label}</label>
+        )}
+        {opts.presets && opts.presets.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {opts.presets.map((p) => (
+              <button
+                key={p.value}
+                type="button"
+                onClick={() => finish(p.value)}
+                className="rounded-full border border-gray-200 px-3 py-1 text-sm text-ink-soft transition-colors hover:border-accent hover:bg-accent/10 hover:text-accent"
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
         )}
         {opts.multiline ? (
           <textarea

@@ -87,6 +87,35 @@ export const SummaryIcon = (p: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+export const ExpandIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M12 4v16" />
+    <path d="M8 7l4-4 4 4M8 17l4 4 4-4" />
+  </svg>
+);
+
+export const DetailIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M5 6h14M5 11h12M5 16h7" />
+    <path d="M16.5 16.5h4M18.5 14.5v4" />
+  </svg>
+);
+
+export const ConcentrateIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M5 12h14" />
+    <path d="M8 4l4 4 4-4M8 20l4-4 4 4" />
+  </svg>
+);
+
+export const FocusIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="7" />
+    <path d="M12 3v2M12 19v2M3 12h2M19 12h2" />
+    <circle cx="12" cy="12" r="1.5" />
+  </svg>
+);
+
 export const SettingsIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <circle cx="12" cy="12" r="3" />
@@ -97,6 +126,13 @@ export const SettingsIcon = (p: SVGProps<SVGSVGElement>) => (
 export const CloseIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <path d="M6 6l12 12M18 6L6 18" />
+  </svg>
+);
+
+export const DraftIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M4 6h11M4 11h8M4 16h5" />
+    <path d="M14.5 18.5l5-5 1.8 1.8-5 5-2.3.5z" />
   </svg>
 );
 

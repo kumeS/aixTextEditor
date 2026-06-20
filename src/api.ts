@@ -41,6 +41,8 @@ export const api = {
   aiProcess: (request: AiRequest) =>
     invoke<string>("ai_process", { request }),
 
+  aiDraft: (theme: string) => invoke<Document>("ai_draft", { theme }),
+
   aiGenerateDiagram: (text: string, instruction?: string) =>
     invoke<string>("ai_generate_diagram", {
       text,

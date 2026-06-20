@@ -2,11 +2,12 @@
 // settings.rs). All Rust structs use `#[serde(rename_all = "camelCase")]`, so
 // these field names line up 1:1 across the IPC boundary.
 
-export type ChunkType = "text" | "diagram";
+export type ChunkType = "text" | "diagram" | "heading";
 
 export interface ChunkMetadata {
   chunkType: ChunkType;
   format?: string; // e.g. "mermaid" when chunkType === "diagram"
+  level?: number; // 1–3 when chunkType === "heading"
   summary?: string;
   linkedChunks: string[];
 }
@@ -26,12 +27,21 @@ export interface Document {
 
 export interface Settings {
   endpoint: string;
-  model: string;
+  model: string; // the active model id
+  models: string[]; // the user's selectable model list (persisted)
   defaultTargetLanguage: string;
   temperature: number;
 }
 
-export type AiAction = "translate" | "proofread" | "summarize" | "custom";
+export type AiAction =
+  | "translate"
+  | "proofread"
+  | "summarize"
+  | "expand"
+  | "detailed"
+  | "concentrate"
+  | "focus"
+  | "custom";
 
 export interface AiRequest {
   action: AiAction;
@@ -39,6 +49,7 @@ export interface AiRequest {
   contextBefore?: string;
   contextAfter?: string;
   targetLanguage?: string;
+  style?: string; // target writing style for "proofread"
   instruction?: string;
 }
 

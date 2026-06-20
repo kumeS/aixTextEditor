@@ -31,6 +31,8 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # Each backend is target-gated inside the crate, so listing all is safe cross-platform.
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 thiserror = "2"
+# Async sleep for backoff between API retries (uses Tauri's existing tokio runtime).
+tokio = { version = "1", features = ["time"] }
 
 [profile.release]
 # Smaller, faster-to-ship desktop binaries.

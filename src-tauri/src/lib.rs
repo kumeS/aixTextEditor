@@ -24,6 +24,7 @@ pub fn run() {
             commands::has_api_key,
             commands::delete_api_key,
             commands::ai_process,
+            commands::ai_draft,
             commands::ai_generate_diagram,
             commands::ai_analyze_document,
         ])

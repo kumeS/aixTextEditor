@@ -10,7 +10,7 @@
 //! §3.1, "context-aware editing") so the model produces logically coherent text.
 
 use crate::error::{AppError, AppResult};
-use crate::models::{Document, CHUNK_TYPE_DIAGRAM};
+use crate::models::{Document, CHUNK_TYPE_TEXT};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -43,33 +43,76 @@ impl OpenRouterProvider {
 impl LlmProvider for OpenRouterProvider {
     async fn complete(&self, system: &str, user: &str) -> AppResult<String> {
         let client = reqwest::Client::new();
-        let res = client
-            .post(&self.config.endpoint)
-            .header("Authorization", format!("Bearer {}", self.config.api_key))
-            // OpenRouter attribution headers (optional but recommended).
-            .header("HTTP-Referer", "https://github.com/kumeS/AIX_Text_Editor")
-            .header("X-Title", "AIX Text Editor")
-            .json(&json!({
-                "model": self.config.model,
-                "temperature": self.config.temperature,
-                "messages": [
-                    { "role": "system", "content": system },
-                    { "role": "user", "content": user }
-                ]
-            }))
-            .send()
-            .await?;
+        let payload = json!({
+            "model": self.config.model,
+            "temperature": self.config.temperature,
+            "messages": [
+                { "role": "system", "content": system },
+                { "role": "user", "content": user }
+            ]
+        });
 
-        let status = res.status();
-        let body: serde_json::Value = res.json().await?;
+        // Free OpenRouter models share tight rate limits and frequently return
+        // 429 (or transient 5xx) under load. Retry a few times with backoff,
+        // honouring Retry-After, before surfacing an actionable error.
+        const MAX_ATTEMPTS: u32 = 3;
+        let mut attempt: u32 = 0;
+        let body: serde_json::Value = loop {
+            attempt += 1;
+            let res = client
+                .post(&self.config.endpoint)
+                .header("Authorization", format!("Bearer {}", self.config.api_key))
+                // OpenRouter attribution headers (optional but recommended).
+                .header("HTTP-Referer", "https://github.com/kumeS/AIX_Text_Editor")
+                .header("X-Title", "AIX Text Editor")
+                .json(&payload)
+                .send()
+                .await?;
 
-        if !status.is_success() {
-            let msg = body["error"]["message"]
+            let status = res.status();
+
+            // 429 (rate limit) and 5xx are transient — retry with backoff.
+            if (status.as_u16() == 429 || status.is_server_error()) && attempt < MAX_ATTEMPTS {
+                let retry_after = res
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.trim().parse::<u64>().ok());
+                // Honour Retry-After, else exponential backoff; cap so the UI
+                // never hangs for long.
+                let wait = retry_after.unwrap_or(1u64 << (attempt - 1)).min(5);
+                tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                continue;
+            }
+
+            let body: serde_json::Value = res.json().await?;
+            if status.is_success() {
+                break body;
+            }
+
+            let provider_msg = body["error"]["message"]
                 .as_str()
                 .or_else(|| body["error"].as_str())
                 .unwrap_or("unknown error");
-            return Err(AppError::Network(format!("API {}: {}", status.as_u16(), msg)));
-        }
+            let msg = match status.as_u16() {
+                429 => format!(
+                    "Rate limited (429). Free OpenRouter models share tight limits — wait a minute and \
+                     retry, switch to another model in Settings, or add credit at openrouter.ai. \
+                     (provider: {provider_msg})"
+                ),
+                401 | 403 => format!(
+                    "Authorization failed ({}). Check your OpenRouter API key in Settings. \
+                     (provider: {provider_msg})",
+                    status.as_u16()
+                ),
+                404 => format!(
+                    "Model not found (404). Verify the model id in Settings — it may be unavailable or \
+                     have changed. (provider: {provider_msg})"
+                ),
+                code => format!("API {code}: {provider_msg}"),
+            };
+            return Err(AppError::Network(msg));
+        };
 
         let out = body["choices"][0]["message"]["content"]
             .as_str()
@@ -100,6 +143,10 @@ pub struct AiRequest {
     pub context_after: Option<String>,
     #[serde(default)]
     pub target_language: Option<String>,
+    /// Target writing style for the "proofread" action (e.g. "concise and
+    /// formal"). When empty, proofreading defaults to a scholarly tone.
+    #[serde(default)]
+    pub style: Option<String>,
     /// Free-form instruction for the "custom" action.
     #[serde(default)]
     pub instruction: Option<String>,
@@ -169,13 +216,46 @@ pub async fn run_action(config: &LlmConfig, req: &AiRequest) -> AppResult<String
                  with no preamble, notes, or quotation marks."
             )
         }
-        "proofread" => "You are a meticulous academic copy-editor. Correct spelling, grammar and punctuation, \
-             improve clarity and concision, and adjust toward a scholarly tone, while preserving the author's \
-             meaning and language. Use the surrounding context only for consistency. Output ONLY the revised \
-             paragraph, with no preamble, explanations, or quotation marks."
-            .to_string(),
+        "proofread" => {
+            let style = req
+                .style
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("scholarly and academic");
+            format!(
+                "You are a meticulous copy-editor. Correct spelling, grammar and punctuation, improve \
+                 clarity and concision, and adjust the writing toward a {style} style, while preserving \
+                 the author's meaning and language. Use the surrounding context only for consistency. \
+                 Output ONLY the revised paragraph, with no preamble, explanations, or quotation marks."
+            )
+        }
         "summarize" => "You are an expert academic editor. Write a single concise sentence summarizing the \
              target paragraph, suitable as metadata. Output ONLY that sentence."
+            .to_string(),
+        "expand" => "You are an academic writing assistant. Expand and develop the target paragraph: add \
+             supporting sentences, elaboration, and smooth transitions so it reads more thoroughly, while \
+             preserving the original meaning, language, and tone. Do not introduce unrelated claims or \
+             fabricated facts. Use the surrounding context only for coherence; do not repeat it. Output \
+             ONLY the expanded paragraph, with no preamble, explanation, or quotation marks."
+            .to_string(),
+        "detailed" => "You are an academic writing assistant. Rewrite the target paragraph in greater \
+             detail: turn general statements into specific, concrete ones and add clarifying explanation, \
+             while preserving the original meaning, language, and tone. Do not invent false facts, data, \
+             or citations. Use the surrounding context only for coherence; do not repeat it. Output ONLY \
+             the revised paragraph, with no preamble, explanation, or quotation marks."
+            .to_string(),
+        "concentrate" => "You are an academic writing assistant. Condense the target paragraph: remove \
+             redundancy and wordiness and tighten the phrasing so it is more concise, while keeping all \
+             key information and preserving the original meaning, language, and tone. Use the surrounding \
+             context only for coherence; do not repeat it. Output ONLY the condensed paragraph, with no \
+             preamble, explanation, or quotation marks."
+            .to_string(),
+        "focus" => "You are an academic writing assistant. Sharpen the target paragraph so it centers \
+             clearly on its main point: cut tangential or digressive material and keep the core argument, \
+             while preserving the original meaning, language, and tone. Use the surrounding context only \
+             for coherence; do not repeat it. Output ONLY the focused paragraph, with no preamble, \
+             explanation, or quotation marks."
             .to_string(),
         "custom" => req
             .instruction
@@ -228,6 +308,19 @@ pub async fn generate_diagram(
     Ok(strip_code_fences(&raw))
 }
 
+/// Generate a structured first draft (Markdown headings + paragraphs) on a theme.
+pub async fn generate_draft(config: &LlmConfig, theme: &str) -> AppResult<String> {
+    let provider = OpenRouterProvider::new(config.clone());
+    let system = "You are an academic writing assistant. Write a coherent, well-structured first draft on \
+         the user's theme. Organise it with Markdown ATX headings to show the document structure — '#' for \
+         chapter-level headings, '##' for sections, '###' for subsections — and write the body as clear \
+         prose paragraphs separated by blank lines. Order the material logically (e.g. introduction, \
+         development, conclusion). Do NOT restate the theme verbatim as the very first line, and do NOT use \
+         bullet lists, tables, code fences, or any commentary — output ONLY the draft itself (headings and \
+         paragraphs).";
+    provider.complete(system, theme.trim()).await
+}
+
 fn extract_json(s: &str) -> &str {
     let start = s.find('{');
     let end = s.rfind('}');
@@ -241,10 +334,12 @@ fn extract_json(s: &str) -> &str {
 pub async fn analyze_document(config: &LlmConfig, doc: &Document) -> AppResult<AnalysisResult> {
     let provider = OpenRouterProvider::new(config.clone());
 
-    // Only feed textual chunks to the analyzer; diagrams have no prose relations.
+    // Only feed prose paragraphs to the analyzer; diagrams and headings carry no
+    // paragraph-level relations (and headings aren't restored as graph nodes on
+    // reload, so including them here would make the live/reopened graph diverge).
     let mut listing = String::new();
     for chunk in doc.chunks.iter() {
-        if chunk.metadata.chunk_type == CHUNK_TYPE_DIAGRAM {
+        if chunk.metadata.chunk_type != CHUNK_TYPE_TEXT {
             continue;
         }
         let snippet: String = chunk.content.chars().take(600).collect();

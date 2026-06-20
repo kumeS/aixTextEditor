@@ -17,13 +17,29 @@ pub const SETTINGS_FILE: &str = "settings.json";
 pub const DEFAULT_ENDPOINT: &str = "https://openrouter.ai/api/v1/chat/completions";
 /// A free OpenRouter model is used by default. Model availability on OpenRouter
 /// changes over time, so this is fully overridable from the Settings screen.
-pub const DEFAULT_MODEL: &str = "google/gemma-2-9b-it:free";
+pub const DEFAULT_MODEL: &str = "google/gemma-4-31b-it:free";
+
+/// Starter list of selectable models. Users add/remove their own from Settings;
+/// ids may change over time on OpenRouter, so the list is fully editable.
+fn default_models() -> Vec<String> {
+    vec![
+        DEFAULT_MODEL.to_string(),
+        "google/gemma-2-9b-it:free".to_string(),
+        "meta-llama/llama-3.3-70b-instruct:free".to_string(),
+        "deepseek/deepseek-r1:free".to_string(),
+    ]
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     pub endpoint: String,
+    /// The active model id used for requests.
     pub model: String,
+    /// The user's selectable model list. `#[serde(default)]` keeps older
+    /// settings files (without this field) loadable.
+    #[serde(default = "default_models")]
+    pub models: Vec<String>,
     pub default_target_language: String,
     pub temperature: f32,
 }
@@ -33,6 +49,7 @@ impl Default for Settings {
         Self {
             endpoint: DEFAULT_ENDPOINT.to_string(),
             model: DEFAULT_MODEL.to_string(),
+            models: default_models(),
             default_target_language: "English".to_string(),
             temperature: 0.3,
         }

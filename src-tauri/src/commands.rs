@@ -101,6 +101,19 @@ pub async fn ai_process(app: AppHandle, request: AiRequest) -> AppResult<String>
     ai::run_action(&config, &request).await
 }
 
+/// Generate a full document draft on a theme, split into paragraph + heading chunks.
+#[tauri::command]
+pub async fn ai_draft(app: AppHandle, theme: String) -> AppResult<Document> {
+    let config = load_llm_config(&app)?;
+    let markdown = ai::generate_draft(&config, &theme).await?;
+    let title = if theme.trim().is_empty() {
+        "Untitled Document".to_string()
+    } else {
+        theme.trim().to_string()
+    };
+    Ok(fileio::text_to_document(&title, &markdown))
+}
+
 #[tauri::command]
 pub async fn ai_generate_diagram(
     app: AppHandle,

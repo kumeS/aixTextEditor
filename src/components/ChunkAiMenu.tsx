@@ -9,13 +9,27 @@ import {
 import { useStore } from "../store";
 import { promptDialog } from "./PromptModal";
 import {
+  ConcentrateIcon,
+  DetailIcon,
+  ExpandIcon,
   FlowIcon,
+  FocusIcon,
   LanguagesIcon,
   SparklesIcon,
   SpinnerIcon,
   SummaryIcon,
   WandIcon,
 } from "./icons";
+
+// Quick-pick proofreading styles. The value is the phrase sent to the model;
+// leaving the field blank falls back to a scholarly/academic tone (ai.rs).
+const PROOFREAD_STYLES = [
+  { label: "Academic", value: "scholarly and academic" },
+  { label: "Formal", value: "formal and professional" },
+  { label: "Concise", value: "concise and direct" },
+  { label: "Plain", value: "plain and easy to read for a general audience" },
+  { label: "Persuasive", value: "persuasive and compelling" },
+];
 
 interface Props {
   chunkId: string;
@@ -56,12 +70,42 @@ export default function ChunkAiMenu({ chunkId, isText, busy }: Props) {
 
   const onProofread = async () => {
     close();
-    await runChunkAction(chunkId, "proofread");
+    const style = await promptDialog({
+      title: "Proofread",
+      label: "Pick a style to rewrite toward (or type your own):",
+      presets: PROOFREAD_STYLES,
+      defaultValue: "",
+      placeholder: "e.g. concise and formal",
+      submitLabel: "Proofread",
+    });
+    if (style === null) return;
+    // Blank → backend default (scholarly/academic).
+    await runChunkAction(chunkId, "proofread", { style: style || undefined });
   };
 
   const onSummarize = async () => {
     close();
     await runChunkAction(chunkId, "summarize");
+  };
+
+  const onExpand = async () => {
+    close();
+    await runChunkAction(chunkId, "expand");
+  };
+
+  const onDetail = async () => {
+    close();
+    await runChunkAction(chunkId, "detailed");
+  };
+
+  const onConcentrate = async () => {
+    close();
+    await runChunkAction(chunkId, "concentrate");
+  };
+
+  const onFocus = async () => {
+    close();
+    await runChunkAction(chunkId, "focus");
   };
 
   const onDiagram = async () => {
@@ -114,7 +158,19 @@ export default function ChunkAiMenu({ chunkId, isText, busy }: Props) {
                 <LanguagesIcon /> Translate…
               </button>
               <button className={item} onClick={onProofread}>
-                <WandIcon /> Proofread
+                <WandIcon /> Proofread…
+              </button>
+              <button className={item} onClick={onExpand}>
+                <ExpandIcon /> Expand
+              </button>
+              <button className={item} onClick={onDetail}>
+                <DetailIcon /> Add detail
+              </button>
+              <button className={item} onClick={onConcentrate}>
+                <ConcentrateIcon /> Concentrate
+              </button>
+              <button className={item} onClick={onFocus}>
+                <FocusIcon /> Focus
               </button>
               <button className={item} onClick={onSummarize}>
                 <SummaryIcon /> Summarize

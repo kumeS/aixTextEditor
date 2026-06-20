@@ -40,7 +40,7 @@ function message(e: unknown): string {
 export async function runChunkAction(
   chunkId: string,
   action: AiAction,
-  opts: { targetLanguage?: string; instruction?: string } = {}
+  opts: { targetLanguage?: string; instruction?: string; style?: string } = {}
 ): Promise<void> {
   const s = useStore.getState();
   const { chunk, before, after } = neighbours(chunkId);
@@ -63,6 +63,7 @@ export async function runChunkAction(
       contextBefore: before,
       contextAfter: after,
       targetLanguage: opts.targetLanguage,
+      style: opts.style,
       instruction: opts.instruction,
     });
     if (action === "summarize") {
@@ -110,69 +111,6 @@ export async function generateDiagramFromChunk(
     s.notify(message(e), "error");
   } finally {
     useStore.getState().setBusyChunk(chunkId, false);
-  }
-}
-
-/**
- * Translate every non-empty text chunk into the target language (spec §3.2,
- * which targets "a specified paragraph — or the whole document"). Each
- * paragraph is translated with its (already-translated) neighbours as context.
- */
-export async function translateDocument(targetLanguage: string): Promise<void> {
-  const s = useStore.getState();
-  if (!s.hasApiKey) {
-    s.notify("Set your OpenRouter API key in Settings first.", "error");
-    s.openSettings();
-    return;
-  }
-  const targets = s.doc.chunks.filter(
-    (c) => c.metadata.chunkType === "text" && c.content.trim()
-  );
-  if (targets.length === 0) {
-    s.notify("There are no paragraphs to translate.", "info");
-    return;
-  }
-
-  let done = 0;
-  let failed = 0;
-  const progress = () =>
-    useStore
-      .getState()
-      .setGlobalBusy(
-        `Translating to ${targetLanguage}… (${done + failed}/${targets.length})`
-      );
-  progress();
-  try {
-    for (const target of targets) {
-      const { before, after } = neighbours(target.id);
-      try {
-        const result = await api.aiProcess({
-          action: "translate",
-          text: target.content,
-          contextBefore: before,
-          contextAfter: after,
-          targetLanguage,
-        });
-        useStore.getState().replaceChunkContent(target.id, result);
-        done += 1;
-      } catch {
-        failed += 1;
-      }
-      progress();
-    }
-    if (failed === 0) {
-      s.notify(
-        `Translated ${done} paragraph(s) (⌘/Ctrl+Z to undo).`,
-        "success"
-      );
-    } else {
-      s.notify(
-        `Translated ${done} paragraph(s); ${failed} failed.`,
-        done > 0 ? "info" : "error"
-      );
-    }
-  } finally {
-    useStore.getState().setGlobalBusy(null);
   }
 }
 
