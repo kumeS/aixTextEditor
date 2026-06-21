@@ -53,12 +53,12 @@ const LANGUAGES = [
 // to every writing action (proofread/expand/… and drafts) for a consistent
 // voice; an empty value keeps the model's neutral academic default.
 const WRITING_TONES: { label: string; value: string }[] = [
-  { label: "標準 / Default", value: "" },
-  { label: "ブログ風 / Blog", value: "engaging, conversational blog" },
-  { label: "メモ風 / Memo", value: "concise, plain note/memo" },
-  { label: "報告書風 / Report", value: "structured, factual business report" },
-  { label: "Scientific 風", value: "objective, precise scientific" },
-  { label: "学術論文風 / Academic", value: "formal scholarly academic-paper" },
+  { label: "Default", value: "" },
+  { label: "Blog", value: "engaging, conversational blog" },
+  { label: "Memo", value: "concise, plain note/memo" },
+  { label: "Report", value: "structured, factual business report" },
+  { label: "Scientific", value: "objective, precise scientific" },
+  { label: "Academic paper", value: "formal scholarly academic-paper" },
 ];
 
 /** Ensure each active model always appears in its selectable list. */
