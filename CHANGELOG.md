@@ -1,5 +1,48 @@
 # Changelog
 
+## v1.1.0 — 2026-06-22
+
+Feature update focused on language consistency, drafting, illustration and
+accessibility.
+
+### Settings
+- **Default language** moved to the top of Settings and renamed from “Default
+  translation language”. It is now the output language for **every** AI action,
+  so results no longer drift (e.g. proofreading Japanese keeps it Japanese).
+- **Writing tone** — choose a global voice (Blog / Memo / Report / Scientific /
+  Academic paper) applied to all writing actions.
+- Expanded pre-registered **text models** (default: `deepseek/deepseek-v4-flash`)
+  and **image models** (Grok Imagine, Recraft v4 Pro, GPT-5.4-image, FLUX.2).
+- Endpoint help now recommends the OpenRouter default and documents using a
+  local **Ollama** endpoint (API key optional for local endpoints).
+
+### Drafting
+- **Draft a document by AI** (renamed) with an approximate **length** setting and
+  attachable **reference material** — pasted text, a file (`.txt/.md/.rtf/.pdf`),
+  or a fetched **URL** the draft is grounded in.
+
+### Per-paragraph AI
+- **Streaming** output for per-chunk actions (translate, proofread, …), like Draft.
+- **Revise with context** — rewrite a paragraph to fit its neighbours.
+- **Version history per paragraph** — every AI edit saves the previous version;
+  swap back at any time.
+- **Change highlight** — after proofreading, see exactly what changed (word-level).
+- **Multi-paragraph editing** — apply one instruction to all selected paragraphs.
+- AI actions (proofread / translate / custom) now available on **headings**, in
+  addition to the H1/H2/H3 picker.
+
+### Images & figures
+- **Regenerate** button and **version gallery** on image chunks — keep every
+  alternative and pick the final one.
+- **Presentation figure** generation — a clean diagram-style illustration,
+  separate from literal image generation.
+
+### Other
+- **Read aloud** (text-to-speech) for any paragraph (macOS speech synthesizer).
+- **PDF export** via the system print dialog (handles CJK fonts correctly).
+- **Help** menu — an in-app guide to the writing workflow (toolbar + native menu).
+- **Tooltips** on the gutter and menu controls.
+
 ## v1.0.0 — 2026-06-21
 
 First public release.

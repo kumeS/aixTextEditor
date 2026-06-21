@@ -10,23 +10,31 @@ import { CloseIcon } from "./icons";
 
 const DEFAULTS: Settings = {
   endpoint: "https://openrouter.ai/api/v1/chat/completions",
-  model: "google/gemma-4-31b-it:free",
+  model: "deepseek/deepseek-v4-flash",
   models: [
+    "deepseek/deepseek-v4-flash",
+    "qwen/qwen3.6-flash",
+    "meta-llama/llama-4-maverick",
+    "moonshotai/kimi-k2.5",
     "google/gemma-4-31b-it:free",
-    "google/gemma-2-9b-it:free",
     "meta-llama/llama-3.3-70b-instruct:free",
     "deepseek/deepseek-r1:free",
   ],
   imageModel: "google/gemini-2.5-flash-image",
   imageModels: [
     "google/gemini-2.5-flash-image",
+    "x-ai/grok-imagine-image-quality",
+    "recraft/recraft-v4-pro",
+    "openai/gpt-5.4-image-2",
+    "black-forest-labs/flux.2-klein-4b",
     "google/gemini-3-pro-image-preview",
   ],
   defaultTargetLanguage: "English",
+  writingTone: "",
   temperature: 0.3,
 };
 
-// Common target languages for the default-translation picker.
+// Common languages for the default-language picker.
 const LANGUAGES = [
   "English",
   "日本語",
@@ -39,6 +47,18 @@ const LANGUAGES = [
   "Italiano",
   "Русский",
   "العربية",
+];
+
+// Writing-tone presets. The value is the phrase sent to the model and applied
+// to every writing action (proofread/expand/… and drafts) for a consistent
+// voice; an empty value keeps the model's neutral academic default.
+const WRITING_TONES: { label: string; value: string }[] = [
+  { label: "標準 / Default", value: "" },
+  { label: "ブログ風 / Blog", value: "engaging, conversational blog" },
+  { label: "メモ風 / Memo", value: "concise, plain note/memo" },
+  { label: "報告書風 / Report", value: "structured, factual business report" },
+  { label: "Scientific 風", value: "objective, precise scientific" },
+  { label: "学術論文風 / Academic", value: "formal scholarly academic-paper" },
 ];
 
 /** Ensure each active model always appears in its selectable list. */
@@ -236,6 +256,34 @@ export default function SettingsModal() {
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
+          <div className="rounded-lg border border-accent/30 bg-accent/5 p-3">
+            <label className={labelCls}>Default language</label>
+            <select
+              value={form.defaultTargetLanguage}
+              onChange={(e) => update("defaultTargetLanguage", e.target.value)}
+              className={field}
+            >
+              {/* Keep a custom stored value selectable if it isn't in the list. */}
+              {!LANGUAGES.includes(form.defaultTargetLanguage) &&
+                form.defaultTargetLanguage && (
+                  <option value={form.defaultTargetLanguage}>
+                    {form.defaultTargetLanguage}
+                  </option>
+                )}
+              {LANGUAGES.map((l) => (
+                <option key={l} value={l}>
+                  {l}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-ink-faint">
+              The output language for <strong>all</strong> AI actions — translation
+              target plus the language every result (proofread, expand, summarize,
+              draft…) is written in. Set this and your text stays in this language;
+              e.g. proofreading Japanese keeps it Japanese.
+            </p>
+          </div>
+
           <div>
             <label className={labelCls}>OpenRouter API key</label>
             <input
@@ -272,8 +320,12 @@ export default function SettingsModal() {
               placeholder={DEFAULTS.endpoint}
             />
             <p className="mt-1 text-xs text-ink-faint">
-              Any OpenAI-compatible chat-completions endpoint (OpenRouter, a local
-              Ollama bridge, etc.).
+              <strong>Recommended:</strong> keep the OpenRouter default{" "}
+              <code>{DEFAULTS.endpoint}</code>. Any OpenAI-compatible
+              chat-completions endpoint also works — e.g. a local Ollama bridge at{" "}
+              <code>http://localhost:11434/v1/chat/completions</code> (leave the API
+              key blank for local endpoints). Image generation requires an
+              OpenRouter image model.
             </p>
           </div>
 
@@ -312,25 +364,25 @@ export default function SettingsModal() {
 
           <div className="flex gap-4">
             <div className="flex-1">
-              <label className={labelCls}>Default translation language</label>
+              <label className={labelCls}>Writing tone</label>
               <select
-                value={form.defaultTargetLanguage}
-                onChange={(e) => update("defaultTargetLanguage", e.target.value)}
+                value={form.writingTone}
+                onChange={(e) => update("writingTone", e.target.value)}
                 className={field}
               >
-                {/* Keep a custom stored value selectable if it isn't in the list. */}
-                {!LANGUAGES.includes(form.defaultTargetLanguage) &&
-                  form.defaultTargetLanguage && (
-                    <option value={form.defaultTargetLanguage}>
-                      {form.defaultTargetLanguage}
-                    </option>
-                  )}
-                {LANGUAGES.map((l) => (
-                  <option key={l} value={l}>
-                    {l}
+                {/* Keep a custom stored tone selectable if it isn't a preset. */}
+                {!WRITING_TONES.some((t) => t.value === form.writingTone) && (
+                  <option value={form.writingTone}>{form.writingTone}</option>
+                )}
+                {WRITING_TONES.map((t) => (
+                  <option key={t.label} value={t.value}>
+                    {t.label}
                   </option>
                 ))}
               </select>
+              <p className="mt-1 text-xs text-ink-faint">
+                Applied to every writing action (proofread, expand, draft…).
+              </p>
             </div>
             <div className="w-40">
               <label className={labelCls}>

@@ -39,11 +39,28 @@ export const api = {
   aiProcess: (request: AiRequest) =>
     invoke<string>("ai_process", { request }),
 
+  /** Streaming variant; `onDelta` gets the full accumulated text, resolves with final. */
+  aiProcessStream: (request: AiRequest, onDelta: (text: string) => void) => {
+    const channel = new Channel<string>();
+    channel.onmessage = onDelta;
+    return invoke<string>("ai_process_stream", { request, onDelta: channel });
+  },
+
   /** Stream a draft; `onEvent` fires with live snapshots then the final document. */
-  aiDraftStream: (theme: string, onEvent: (e: DraftEvent) => void) => {
+  aiDraftStream: (
+    theme: string,
+    targetWords: number | undefined,
+    reference: string | undefined,
+    onEvent: (e: DraftEvent) => void
+  ) => {
     const channel = new Channel<DraftEvent>();
     channel.onmessage = onEvent;
-    return invoke<void>("ai_draft_stream", { theme, onEvent: channel });
+    return invoke<void>("ai_draft_stream", {
+      theme,
+      targetWords: targetWords ?? null,
+      reference: reference ?? null,
+      onEvent: channel,
+    });
   },
 
   aiGenerateImage: (prompt: string) =>
@@ -57,4 +74,14 @@ export const api = {
 
   aiAnalyzeDocument: (document: Document) =>
     invoke<AnalysisResult>("ai_analyze_document", { document }),
+
+  readReferenceFile: (path: string) =>
+    invoke<string>("read_reference_file", { path }),
+
+  fetchUrlText: (url: string) => invoke<string>("fetch_url_text", { url }),
+
+  speakText: (text: string, voice?: string) =>
+    invoke<void>("speak_text", { text, voice: voice ?? null }),
+
+  stopSpeaking: () => invoke<void>("stop_speaking"),
 };

@@ -40,6 +40,15 @@ pub struct ChunkMetadata {
     /// Ids of chunks this chunk is logically linked to.
     #[serde(default)]
     pub linked_chunks: Vec<String>,
+    /// For image chunks: the prompt/source text used to generate the image, so a
+    /// "regenerate" can re-run the same request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_prompt: Option<String>,
+    /// Prior content values for this chunk (text: previous paragraph versions;
+    /// image: previously generated image URLs) so the user can swap back to an
+    /// earlier version. The current value lives in `Chunk::content`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub content_history: Vec<String>,
 }
 
 fn default_chunk_type() -> String {
@@ -54,6 +63,8 @@ impl Default for ChunkMetadata {
             level: None,
             summary: None,
             linked_chunks: Vec::new(),
+            image_prompt: None,
+            content_history: Vec::new(),
         }
     }
 }
@@ -89,6 +100,8 @@ impl Chunk {
                 level: None,
                 summary: None,
                 linked_chunks: Vec::new(),
+                image_prompt: None,
+                content_history: Vec::new(),
             },
         }
     }
@@ -105,6 +118,8 @@ impl Chunk {
                 level: Some(level.clamp(1, 3)),
                 summary: None,
                 linked_chunks: Vec::new(),
+                image_prompt: None,
+                content_history: Vec::new(),
             },
         }
     }

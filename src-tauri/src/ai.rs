@@ -234,12 +234,40 @@ pub struct AiRequest {
     #[serde(default)]
     pub target_language: Option<String>,
     /// Target writing style for the "proofread" action (e.g. "concise and
-    /// formal"). When empty, proofreading defaults to a scholarly tone.
+    /// formal"). When empty, proofreading defaults to the global writing tone,
+    /// then to a scholarly tone.
     #[serde(default)]
     pub style: Option<String>,
     /// Free-form instruction for the "custom" action.
     #[serde(default)]
     pub instruction: Option<String>,
+    /// The configured default language. Every non-translate action is pinned to
+    /// write its output in this language so results never silently drift away
+    /// from what the user set in Settings.
+    #[serde(default)]
+    pub output_language: Option<String>,
+    /// The global writing tone (blog / memo / report / scientific / academic).
+    /// Applied to the open-ended writing actions for a consistent voice.
+    #[serde(default)]
+    pub tone: Option<String>,
+}
+
+/// Trailing constraints appended to a writing action's system prompt: pin the
+/// OUTPUT LANGUAGE (so a result never drifts away from the user's configured
+/// default language — e.g. Japanese text staying Japanese after proofreading)
+/// and, optionally, the global writing tone.
+fn output_constraints(language: Option<&str>, tone: Option<&str>) -> String {
+    let mut s = String::new();
+    if let Some(lang) = language.map(str::trim).filter(|l| !l.is_empty()) {
+        s.push_str(&format!(
+            " IMPORTANT: write your ENTIRE output in {lang}, regardless of the input language — \
+             do not switch to any other language."
+        ));
+    }
+    if let Some(t) = tone.map(str::trim).filter(|t| !t.is_empty()) {
+        s.push_str(&format!(" Adopt a {t} writing tone."));
+    }
+    s
 }
 
 // Analysis graph types (AnalysisNode/Edge/Result) live in `models.rs` so they
@@ -262,79 +290,130 @@ fn context_block(req: &AiRequest) -> String {
     ctx
 }
 
-/// Run a one-click text action (translate / proofread / summarize / custom).
-pub async fn run_action(config: &LlmConfig, req: &AiRequest) -> AppResult<String> {
-    let provider = OpenRouterProvider::new(config.clone());
+/// Build the system prompt for a one-click action.
+fn action_system(req: &AiRequest) -> AppResult<String> {
+    let lang = req.output_language.as_deref();
+    let tone = req.tone.as_deref();
 
     let system = match req.action.as_str() {
         "translate" => {
-            let lang = req
+            let target = req
                 .target_language
                 .clone()
                 .unwrap_or_else(|| "English".to_string());
             format!(
-                "You are an expert academic translator. Translate the user's target paragraph into {lang}, \
+                "You are an expert academic translator. Translate the user's target paragraph into {target}, \
                  preserving meaning, terminology and an academic tone. Use the surrounding context only to \
                  disambiguate; do not translate or repeat the context. Output ONLY the translated paragraph, \
-                 with no preamble, notes, or quotation marks."
+                 with no preamble, notes, or quotation marks.{}",
+                // Translate already names its target language; only the tone is
+                // an extra constraint here.
+                output_constraints(None, tone)
             )
         }
         "proofread" => {
+            // Explicit per-action style wins; otherwise fall back to the global
+            // writing tone, then to a scholarly default.
             let style = req
                 .style
                 .as_deref()
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
+                .or_else(|| tone.map(str::trim).filter(|t| !t.is_empty()))
                 .unwrap_or("scholarly and academic");
             format!(
                 "You are a meticulous copy-editor. Correct spelling, grammar and punctuation, improve \
                  clarity and concision, and adjust the writing toward a {style} style, while preserving \
-                 the author's meaning and language. Use the surrounding context only for consistency. \
-                 Output ONLY the revised paragraph, with no preamble, explanations, or quotation marks."
+                 the author's meaning. Use the surrounding context only for consistency. \
+                 Output ONLY the revised paragraph, with no preamble, explanations, or quotation marks.{}",
+                output_constraints(lang, None)
             )
         }
-        "summarize" => "You are an expert academic editor. Write a single concise sentence summarizing the \
-             target paragraph, suitable as metadata. Output ONLY that sentence."
-            .to_string(),
-        "expand" => "You are an academic writing assistant. Expand and develop the target paragraph: add \
+        "summarize" => format!(
+            "You are an expert academic editor. Write a single concise sentence summarizing the \
+             target paragraph, suitable as metadata. Output ONLY that sentence.{}",
+            output_constraints(lang, None)
+        ),
+        "expand" => format!(
+            "You are an academic writing assistant. Expand and develop the target paragraph: add \
              supporting sentences, elaboration, and smooth transitions so it reads more thoroughly, while \
-             preserving the original meaning, language, and tone. Do not introduce unrelated claims or \
+             preserving the original meaning and tone. Do not introduce unrelated claims or \
              fabricated facts. Use the surrounding context only for coherence; do not repeat it. Output \
-             ONLY the expanded paragraph, with no preamble, explanation, or quotation marks."
-            .to_string(),
-        "detailed" => "You are an academic writing assistant. Rewrite the target paragraph in greater \
+             ONLY the expanded paragraph, with no preamble, explanation, or quotation marks.{}",
+            output_constraints(lang, tone)
+        ),
+        "detailed" => format!(
+            "You are an academic writing assistant. Rewrite the target paragraph in greater \
              detail: turn general statements into specific, concrete ones and add clarifying explanation, \
-             while preserving the original meaning, language, and tone. Do not invent false facts, data, \
+             while preserving the original meaning and tone. Do not invent false facts, data, \
              or citations. Use the surrounding context only for coherence; do not repeat it. Output ONLY \
-             the revised paragraph, with no preamble, explanation, or quotation marks."
-            .to_string(),
-        "concentrate" => "You are an academic writing assistant. Condense the target paragraph: remove \
+             the revised paragraph, with no preamble, explanation, or quotation marks.{}",
+            output_constraints(lang, tone)
+        ),
+        "concentrate" => format!(
+            "You are an academic writing assistant. Condense the target paragraph: remove \
              redundancy and wordiness and tighten the phrasing so it is more concise, while keeping all \
-             key information and preserving the original meaning, language, and tone. Use the surrounding \
+             key information and preserving the original meaning and tone. Use the surrounding \
              context only for coherence; do not repeat it. Output ONLY the condensed paragraph, with no \
-             preamble, explanation, or quotation marks."
-            .to_string(),
-        "focus" => "You are an academic writing assistant. Sharpen the target paragraph so it centers \
+             preamble, explanation, or quotation marks.{}",
+            output_constraints(lang, tone)
+        ),
+        "focus" => format!(
+            "You are an academic writing assistant. Sharpen the target paragraph so it centers \
              clearly on its main point: cut tangential or digressive material and keep the core argument, \
-             while preserving the original meaning, language, and tone. Use the surrounding context only \
+             while preserving the original meaning and tone. Use the surrounding context only \
              for coherence; do not repeat it. Output ONLY the focused paragraph, with no preamble, \
-             explanation, or quotation marks."
-            .to_string(),
-        "custom" => req
-            .instruction
-            .clone()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| "You are a helpful academic writing assistant. Improve the target paragraph.".to_string()),
+             explanation, or quotation marks.{}",
+            output_constraints(lang, tone)
+        ),
+        "harmonize" => format!(
+            "You are an academic writing assistant. Revise the target paragraph so it connects smoothly \
+             and logically with the preceding and following paragraphs: smooth abrupt transitions, align \
+             terminology, tense and voice with the neighbours, and remove repetition of what they already \
+             say — while preserving the paragraph's own meaning. Use the surrounding context as the \
+             reference for coherence; do NOT merge it in or repeat it. Output ONLY the revised paragraph, \
+             with no preamble, explanation, or quotation marks.{}",
+            output_constraints(lang, tone)
+        ),
+        "custom" => {
+            let base = req
+                .instruction
+                .clone()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| {
+                    "You are a helpful academic writing assistant. Improve the target paragraph.".to_string()
+                });
+            format!("{base}{}", output_constraints(lang, tone))
+        }
         other => return Err(AppError::Other(format!("Unknown AI action: '{other}'"))),
     };
+    Ok(system)
+}
 
-    let user = format!(
-        "{}[Target paragraph]\n{}",
-        context_block(req),
-        req.text.trim()
-    );
+/// Assemble the user message (surrounding context + the target paragraph).
+fn action_user(req: &AiRequest) -> String {
+    format!("{}[Target paragraph]\n{}", context_block(req), req.text.trim())
+}
 
+/// Run a one-click text action (translate / proofread / summarize / custom).
+pub async fn run_action(config: &LlmConfig, req: &AiRequest) -> AppResult<String> {
+    let provider = OpenRouterProvider::new(config.clone());
+    let system = action_system(req)?;
+    let user = action_user(req);
     provider.complete(&system, &user).await
+}
+
+/// Streaming variant of `run_action`: `on_delta` receives the FULL accumulated
+/// text each time new content arrives; the final text is returned.
+pub async fn run_action_stream<F: FnMut(&str)>(
+    config: &LlmConfig,
+    req: &AiRequest,
+    on_delta: F,
+) -> AppResult<String> {
+    let provider = OpenRouterProvider::new(config.clone());
+    let system = action_system(req)?;
+    let user = action_user(req);
+    provider.complete_stream(&system, &user, on_delta).await
 }
 
 fn strip_code_fences(s: &str) -> String {
@@ -481,15 +560,43 @@ const DRAFT_SYSTEM_PROMPT: &str =
      fences, or any commentary — output ONLY the draft itself (headings and paragraphs).";
 
 /// Stream a draft, invoking `on_delta` with the full accumulated text as it grows.
+/// `target_words` sets an approximate length; `output_language`/`tone` pin the
+/// language and voice; `reference` is optional supporting material (pasted text,
+/// fetched URL/PDF text) the draft should draw on.
 pub async fn generate_draft_stream<F: FnMut(&str)>(
     config: &LlmConfig,
     theme: &str,
+    target_words: Option<u32>,
+    output_language: Option<&str>,
+    tone: Option<&str>,
+    reference: Option<&str>,
     on_delta: F,
 ) -> AppResult<String> {
     let provider = OpenRouterProvider::new(config.clone());
-    provider
-        .complete_stream(DRAFT_SYSTEM_PROMPT, theme.trim(), on_delta)
-        .await
+
+    let mut system = DRAFT_SYSTEM_PROMPT.to_string();
+    if let Some(w) = target_words.filter(|w| *w > 0) {
+        system.push_str(&format!(
+            " Aim for approximately {w} words in total (within about ±20%); pace the \
+             structure and depth to hit that length."
+        ));
+    }
+    system.push_str(&output_constraints(output_language, tone));
+
+    let user = match reference.map(str::trim).filter(|r| !r.is_empty()) {
+        Some(r) => {
+            // Cap the reference so an over-long paste/PDF can't blow the context.
+            let snippet: String = r.chars().take(12_000).collect();
+            format!(
+                "Theme: {}\n\n[Reference material to draw on — ground the draft in this; do not copy it verbatim]\n{}",
+                theme.trim(),
+                snippet
+            )
+        }
+        None => theme.trim().to_string(),
+    };
+
+    provider.complete_stream(&system, &user, on_delta).await
 }
 
 fn extract_json(s: &str) -> &str {

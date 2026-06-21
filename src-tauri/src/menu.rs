@@ -37,10 +37,12 @@ pub fn build<R: Runtime>(app: &App<R>) -> tauri::Result<Menu<R>> {
     let export_txt = MenuItemBuilder::with_id("export_txt", "Export as .txt").build(app)?;
     let export_md = MenuItemBuilder::with_id("export_md", "Export as .md").build(app)?;
     let export_rtf = MenuItemBuilder::with_id("export_rtf", "Export as .rtf").build(app)?;
+    let export_pdf = MenuItemBuilder::with_id("export_pdf", "Export as .pdf").build(app)?;
     let export = SubmenuBuilder::new(app, "Export")
         .item(&export_txt)
         .item(&export_md)
         .item(&export_rtf)
+        .item(&export_pdf)
         .build()?;
     let file_menu = SubmenuBuilder::new(app, "File")
         .item(&new_tab)
@@ -65,7 +67,7 @@ pub fn build<R: Runtime>(app: &App<R>) -> tauri::Result<Menu<R>> {
         .build()?;
 
     // AI
-    let draft = MenuItemBuilder::with_id("draft", "Draft from theme…").build(app)?;
+    let draft = MenuItemBuilder::with_id("draft", "Draft a document by AI…").build(app)?;
     let analyze = MenuItemBuilder::with_id("analyze", "Analyze relationships").build(app)?;
     let ai_menu = SubmenuBuilder::new(app, "AI")
         .item(&draft)
@@ -79,7 +81,18 @@ pub fn build<R: Runtime>(app: &App<R>) -> tauri::Result<Menu<R>> {
         .close_window()
         .build()?;
 
+    // Help — links to the in-app workflow guide.
+    let help_guide = MenuItemBuilder::with_id("help", "How to write (workflow guide)…").build(app)?;
+    let help_menu = SubmenuBuilder::new(app, "Help").item(&help_guide).build()?;
+
     MenuBuilder::new(app)
-        .items(&[&app_menu, &file_menu, &edit_menu, &ai_menu, &window_menu])
+        .items(&[
+            &app_menu,
+            &file_menu,
+            &edit_menu,
+            &ai_menu,
+            &window_menu,
+            &help_menu,
+        ])
         .build()
 }

@@ -35,10 +35,15 @@ pub fn run() {
             commands::has_api_key,
             commands::delete_api_key,
             commands::ai_process,
+            commands::ai_process_stream,
             commands::ai_draft_stream,
             commands::ai_generate_image,
             commands::ai_generate_diagram,
             commands::ai_analyze_document,
+            commands::read_reference_file,
+            commands::fetch_url_text,
+            commands::speak_text,
+            commands::stop_speaking,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -36,6 +36,26 @@ function message(e: unknown): string {
   return typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
 }
 
+/** Endpoints served from the local machine (e.g. Ollama) don't need an API key. */
+function isLocalEndpoint(endpoint: string | undefined): boolean {
+  const e = (endpoint ?? "").toLowerCase();
+  return (
+    e.includes("localhost") ||
+    e.includes("127.0.0.1") ||
+    e.includes("0.0.0.0") ||
+    e.includes("[::1]")
+  );
+}
+
+/**
+ * Whether AI calls can proceed: a key is set, OR the endpoint is a local
+ * (keyless) provider such as Ollama. Used to gate every AI action.
+ */
+export function aiReady(): boolean {
+  const s = useStore.getState();
+  return s.hasApiKey || isLocalEndpoint(s.settings?.endpoint);
+}
+
 /**
  * True while `chunkId` still exists in the ACTIVE document — i.e. the user has
  * not switched tabs (or deleted the chunk) during an async AI call. Guards
@@ -58,23 +78,39 @@ export async function runChunkAction(
     s.notify("This paragraph is empty.", "info");
     return;
   }
-  if (!s.hasApiKey) {
+  if (!aiReady()) {
     s.notify("Set your OpenRouter API key in Settings first.", "error");
     s.openSettings();
     return;
   }
 
+  const request = {
+    action,
+    text: chunk.content,
+    contextBefore: before,
+    contextAfter: after,
+    targetLanguage: opts.targetLanguage,
+    style: opts.style,
+    instruction: opts.instruction,
+    // Pin every non-translate action's output to the configured default
+    // language (so e.g. proofreading Japanese text never drifts to English)
+    // and apply the global writing tone.
+    outputLanguage: s.settings?.defaultTargetLanguage,
+    tone: s.settings?.writingTone || undefined,
+  };
+
+  // Stream every action except "summarize" (which writes metadata, not content).
+  const streaming = action !== "summarize";
   s.setBusyChunk(chunkId, true);
+  if (streaming) useStore.getState().beginChunkStream(chunkId);
   try {
-    const result = await api.aiProcess({
-      action,
-      text: chunk.content,
-      contextBefore: before,
-      contextAfter: after,
-      targetLanguage: opts.targetLanguage,
-      style: opts.style,
-      instruction: opts.instruction,
-    });
+    const result = streaming
+      ? await api.aiProcessStream(request, (text) => {
+          if (useStore.getState().streamingChunkId === chunkId) {
+            useStore.getState().updateChunkStream(text);
+          }
+        })
+      : await api.aiProcess(request);
     if (!chunkStillActive(chunkId)) {
       s.notify("Switched away from that paragraph — result discarded.", "info");
       return;
@@ -94,6 +130,7 @@ export async function runChunkAction(
   } catch (e) {
     s.notify(message(e), "error");
   } finally {
+    if (streaming) useStore.getState().endChunkStream();
     useStore.getState().setBusyChunk(chunkId, false);
   }
 }
@@ -109,7 +146,7 @@ export async function generateDiagramFromChunk(
     s.notify("This paragraph is empty.", "info");
     return;
   }
-  if (!s.hasApiKey) {
+  if (!aiReady()) {
     s.notify("Set your OpenRouter API key in Settings first.", "error");
     s.openSettings();
     return;
@@ -139,7 +176,7 @@ export async function generateImageFromChunk(chunkId: string): Promise<void> {
     s.notify("This paragraph is empty.", "info");
     return;
   }
-  if (!s.hasApiKey) {
+  if (!aiReady()) {
     s.notify("Set your OpenRouter API key in Settings first.", "error");
     s.openSettings();
     return;
@@ -151,7 +188,7 @@ export async function generateImageFromChunk(chunkId: string): Promise<void> {
       s.notify("Switched away from that paragraph — image discarded.", "info");
       return;
     }
-    useStore.getState().insertImageAfter(chunkId, url, chunk.content.slice(0, 200));
+    useStore.getState().insertImageAfter(chunkId, url, chunk.content);
     s.notify("Image generated below the paragraph.", "success");
   } catch (e) {
     s.notify(message(e), "error");
@@ -165,7 +202,7 @@ export async function generateImageFromSelection(): Promise<void> {
   const s = useStore.getState();
   const ids = s.selectedChunkIds;
   if (ids.length === 0) return;
-  if (!s.hasApiKey) {
+  if (!aiReady()) {
     s.notify("Set your OpenRouter API key in Settings first.", "error");
     s.openSettings();
     return;
@@ -192,7 +229,7 @@ export async function generateImageFromSelection(): Promise<void> {
       s.notify("Switched tabs — image discarded.", "info");
       return;
     }
-    useStore.getState().insertImageAfter(insertAfterId, url, prompt.slice(0, 200));
+    useStore.getState().insertImageAfter(insertAfterId, url, prompt);
     useStore.getState().clearSelection();
     s.notify("Image generated from selection.", "success");
   } catch (e) {
@@ -202,10 +239,171 @@ export async function generateImageFromSelection(): Promise<void> {
   }
 }
 
+/** A presentation-style prompt wrapper: ask the image model for a clean diagram. */
+function presentationPrompt(text: string): string {
+  return (
+    "A clean, minimal presentation slide diagram that visually explains the following content. " +
+    "Use a simple flat design with clear labels, boxes and arrows, generous white space, a " +
+    "restrained professional colour palette, and NO photorealism. Content to illustrate:\n\n" +
+    text.trim()
+  );
+}
+
+/**
+ * Generate a simple presentation-style figure (a diagram-like image) from a
+ * paragraph and insert it as an image chunk below. Distinct from a literal
+ * image: it asks the model for an explanatory slide graphic.
+ */
+export async function generatePresentationFromChunk(chunkId: string): Promise<void> {
+  const s = useStore.getState();
+  const chunk = s.doc.chunks.find((c) => c.id === chunkId);
+  if (!chunk || !chunk.content.trim()) {
+    s.notify("This paragraph is empty.", "info");
+    return;
+  }
+  if (!aiReady()) {
+    s.notify("Set your OpenRouter API key in Settings first.", "error");
+    s.openSettings();
+    return;
+  }
+  const prompt = presentationPrompt(chunk.content);
+  s.setBusyChunk(chunkId, true);
+  try {
+    const url = await api.aiGenerateImage(prompt);
+    if (!chunkStillActive(chunkId)) {
+      s.notify("Switched away from that paragraph — figure discarded.", "info");
+      return;
+    }
+    useStore.getState().insertImageAfter(chunkId, url, prompt);
+    s.notify("Presentation figure generated below the paragraph.", "success");
+  } catch (e) {
+    s.notify(message(e), "error");
+  } finally {
+    useStore.getState().setBusyChunk(chunkId, false);
+  }
+}
+
+/**
+ * Regenerate an image chunk from its stored prompt and save the result as a new
+ * version in the chunk's history (the user can swap between alternatives).
+ */
+export async function regenerateImageChunk(chunkId: string): Promise<void> {
+  const s = useStore.getState();
+  const chunk = s.doc.chunks.find((c) => c.id === chunkId);
+  if (!chunk || chunk.metadata.chunkType !== "image") return;
+  const prompt = chunk.metadata.imagePrompt || chunk.metadata.summary || "";
+  if (!prompt.trim()) {
+    s.notify("No source prompt is stored for this image.", "info");
+    return;
+  }
+  if (!aiReady()) {
+    s.notify("Set your OpenRouter API key in Settings first.", "error");
+    s.openSettings();
+    return;
+  }
+  s.setBusyChunk(chunkId, true);
+  try {
+    const url = await api.aiGenerateImage(prompt);
+    if (!chunkStillActive(chunkId)) {
+      s.notify("Switched away — regenerated image discarded.", "info");
+      return;
+    }
+    // replaceChunkContent stores the previous URL in history, so every
+    // alternative stays selectable.
+    useStore.getState().replaceChunkContent(chunkId, url);
+    s.notify("New image version generated.", "success");
+  } catch (e) {
+    s.notify(message(e), "error");
+  } finally {
+    useStore.getState().setBusyChunk(chunkId, false);
+  }
+}
+
+/**
+ * Apply one instruction to every selected text/heading chunk at once (multi-
+ * paragraph editing). Each paragraph keeps its surrounding context and its prior
+ * version in history. Runs sequentially to respect provider rate limits.
+ */
+export async function editSelection(instruction: string): Promise<void> {
+  const s = useStore.getState();
+  const ids = s.selectedChunkIds;
+  if (ids.length === 0) return;
+  if (!aiReady()) {
+    s.notify("Set your OpenRouter API key in Settings first.", "error");
+    s.openSettings();
+    return;
+  }
+  const text = instruction.trim();
+  if (!text) return;
+  // Process selected chunks in document order; skip non-text chunks.
+  const ordered = s.doc.chunks.filter(
+    (c) =>
+      ids.includes(c.id) &&
+      (c.metadata.chunkType === "text" || c.metadata.chunkType === "heading") &&
+      c.content.trim()
+  );
+  if (ordered.length === 0) {
+    s.notify("Select one or more non-empty text paragraphs first.", "info");
+    return;
+  }
+  const tab = s.activeTabId;
+  s.setGlobalBusy(`Editing ${ordered.length} paragraphs…`);
+  let done = 0;
+  try {
+    for (const c of ordered) {
+      if (useStore.getState().activeTabId !== tab) break;
+      await runChunkAction(c.id, "custom", { instruction: text });
+      done += 1;
+      useStore.getState().setGlobalBusy(`Editing ${done}/${ordered.length}…`);
+    }
+    if (useStore.getState().activeTabId === tab) {
+      useStore.getState().clearSelection();
+      s.notify(`Edited ${done} paragraph${done === 1 ? "" : "s"}.`, "success");
+    }
+  } finally {
+    useStore.getState().setGlobalBusy(null);
+  }
+}
+
+/**
+ * Pick a system voice that matches the script of `text` so e.g. Japanese isn't
+ * read with an English voice. Returns undefined (system default) for Latin text.
+ * Rust verifies the voice is installed and falls back if not.
+ */
+function voiceForText(text: string): string | undefined {
+  if (/[぀-ヿ]/.test(text)) return "Kyoko"; // hiragana/katakana → Japanese
+  if (/[가-힣]/.test(text)) return "Yuna"; // hangul → Korean
+  if (/[一-鿿]/.test(text)) return "Tingting"; // Han (no kana) → Chinese
+  return undefined;
+}
+
+/** Read a paragraph aloud via the OS speech synthesizer. */
+export async function speakChunk(chunkId: string): Promise<void> {
+  const s = useStore.getState();
+  const chunk = s.doc.chunks.find((c) => c.id === chunkId);
+  if (!chunk || !chunk.content.trim()) {
+    s.notify("Nothing to read here.", "info");
+    return;
+  }
+  try {
+    await api.speakText(chunk.content, voiceForText(chunk.content));
+  } catch (e) {
+    s.notify(message(e), "error");
+  }
+}
+
+export async function stopSpeaking(): Promise<void> {
+  try {
+    await api.stopSpeaking();
+  } catch {
+    /* best-effort */
+  }
+}
+
 /** Analyze the whole document and open the relationship network panel. */
 export async function analyzeDocument(): Promise<void> {
   const s = useStore.getState();
-  if (!s.hasApiKey) {
+  if (!aiReady()) {
     s.notify("Set your OpenRouter API key in Settings first.", "error");
     s.openSettings();
     return;

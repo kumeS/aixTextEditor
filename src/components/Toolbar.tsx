@@ -4,19 +4,19 @@
 import { useEffect, useRef, useState } from "react";
 import { analyzeDocument } from "../aiActions";
 import {
-  draftDocument,
   exportDocument,
+  exportPdf,
   importDocument,
   openNative,
   saveNative,
 } from "../fileActions";
 import { useStore } from "../store";
 import type { ExportFormat } from "../types";
-import { promptDialog } from "./PromptModal";
 import {
   DraftIcon,
   ExportIcon,
   FolderIcon,
+  HelpIcon,
   ImportIcon,
   NetworkIcon,
   SaveIcon,
@@ -56,6 +56,8 @@ export default function Toolbar() {
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
   const openSettings = useStore((s) => s.openSettings);
+  const openDraft = useStore((s) => s.openDraft);
+  const openHelp = useStore((s) => s.openHelp);
   const toggleNetwork = useStore((s) => s.toggleNetwork);
   const networkOpen = useStore((s) => s.networkOpen);
 
@@ -81,16 +83,9 @@ export default function Toolbar() {
     setFileMenuOpen(false);
     void exportDocument(fmt);
   };
-
-  const onDraft = async () => {
-    const theme = await promptDialog({
-      title: "Draft a document",
-      label: "What theme / topic should I draft about?",
-      placeholder: "e.g. The role of attention mechanisms in NLP",
-      multiline: true,
-      submitLabel: "Draft",
-    });
-    if (theme && theme.trim()) void draftDocument(theme);
+  const doExportPdf = () => {
+    setFileMenuOpen(false);
+    void exportPdf();
   };
 
   return (
@@ -132,6 +127,12 @@ export default function Toolbar() {
                   <ExportIcon className="h-4 w-4" /> .{fmt}
                 </button>
               ))}
+              <button
+                onClick={doExportPdf}
+                className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-sm text-ink-soft hover:bg-gray-100"
+              >
+                <ExportIcon className="h-4 w-4" /> .pdf
+              </button>
             </div>
           )}
         </div>
@@ -149,11 +150,11 @@ export default function Toolbar() {
       <div className="mx-1 h-5 w-px bg-gray-200" />
 
       <ToolButton
-        onClick={() => void onDraft()}
-        title="Draft a new document from a theme (AI)"
+        onClick={openDraft}
+        title="Draft a whole document by AI — set length and attach reference material"
         disabled={!!globalBusy}
       >
-        <DraftIcon /> Draft
+        <DraftIcon /> Draft by AI
       </ToolButton>
 
       <ToolButton
@@ -164,6 +165,10 @@ export default function Toolbar() {
         title="Analyze relationships → network graph"
       >
         <NetworkIcon /> {networkOpen ? "Hide graph" : "Analyze"}
+      </ToolButton>
+
+      <ToolButton onClick={openHelp} title="How to write with aixTextEditor — workflow guide">
+        <HelpIcon /> Help
       </ToolButton>
 
       {/* spacer */}

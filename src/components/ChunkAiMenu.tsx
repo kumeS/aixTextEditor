@@ -5,15 +5,19 @@ import { useEffect, useRef, useState } from "react";
 import {
   runChunkAction,
   generateDiagramFromChunk,
+  generatePresentationFromChunk,
 } from "../aiActions";
 import { useStore } from "../store";
+import type { ChunkType } from "../types";
 import { promptDialog } from "./PromptModal";
+import Tooltip from "./Tooltip";
 import {
   ConcentrateIcon,
   DetailIcon,
   ExpandIcon,
   FlowIcon,
   FocusIcon,
+  ImageIcon,
   LanguagesIcon,
   SparklesIcon,
   SpinnerIcon,
@@ -33,14 +37,16 @@ const PROOFREAD_STYLES = [
 
 interface Props {
   chunkId: string;
-  isText: boolean;
+  chunkType: ChunkType;
   busy: boolean;
 }
 
-export default function ChunkAiMenu({ chunkId, isText, busy }: Props) {
+export default function ChunkAiMenu({ chunkId, chunkType, busy }: Props) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const defaultLang = useStore((s) => s.settings?.defaultTargetLanguage ?? "English");
+  const isText = chunkType === "text";
+  const isHeading = chunkType === "heading";
 
   useEffect(() => {
     if (!open) return;
@@ -108,6 +114,16 @@ export default function ChunkAiMenu({ chunkId, isText, busy }: Props) {
     await runChunkAction(chunkId, "focus");
   };
 
+  const onHarmonize = async () => {
+    close();
+    await runChunkAction(chunkId, "harmonize");
+  };
+
+  const onPresentation = async () => {
+    close();
+    await generatePresentationFromChunk(chunkId);
+  };
+
   const onDiagram = async () => {
     close();
     const instruction = await promptDialog({
@@ -139,16 +155,17 @@ export default function ChunkAiMenu({ chunkId, isText, busy }: Props) {
 
   return (
     <div ref={rootRef} className="relative">
-      <button
-        title="AI actions"
-        aria-label="AI actions"
-        onClick={() => setOpen((v) => !v)}
-        className={`flex h-7 w-7 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-accent/10 hover:text-accent ${
-          open ? "bg-accent/10 text-accent" : ""
-        }`}
-      >
-        {busy ? <SpinnerIcon className="text-accent" /> : <SparklesIcon />}
-      </button>
+      <Tooltip label={isHeading ? "AI actions for this heading" : "AI actions for this paragraph"}>
+        <button
+          aria-label="AI actions"
+          onClick={() => setOpen((v) => !v)}
+          className={`flex h-7 w-7 items-center justify-center rounded-full text-ink-faint transition-colors hover:bg-accent/10 hover:text-accent ${
+            open ? "bg-accent/10 text-accent" : ""
+          }`}
+        >
+          {busy ? <SpinnerIcon className="text-accent" /> : <SparklesIcon />}
+        </button>
+      </Tooltip>
 
       {open && (
         <div className="absolute left-0 top-8 z-30 w-52 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
@@ -159,6 +176,9 @@ export default function ChunkAiMenu({ chunkId, isText, busy }: Props) {
               </button>
               <button className={item} onClick={onProofread}>
                 <WandIcon /> Proofread…
+              </button>
+              <button className={item} onClick={onHarmonize}>
+                <ConcentrateIcon /> Revise with context
               </button>
               <button className={item} onClick={onExpand}>
                 <ExpandIcon /> Expand
@@ -175,8 +195,12 @@ export default function ChunkAiMenu({ chunkId, isText, busy }: Props) {
               <button className={item} onClick={onSummarize}>
                 <SummaryIcon /> Summarize
               </button>
+              <div className="my-1 border-t border-gray-100" />
               <button className={item} onClick={onDiagram}>
                 <FlowIcon /> Generate diagram…
+              </button>
+              <button className={item} onClick={onPresentation}>
+                <ImageIcon /> Presentation figure
               </button>
               <div className="my-1 border-t border-gray-100" />
               <button className={item} onClick={onCustom}>
@@ -184,7 +208,24 @@ export default function ChunkAiMenu({ chunkId, isText, busy }: Props) {
               </button>
             </>
           )}
-          {!isText && (
+          {isHeading && (
+            <>
+              <button className={item} onClick={onTranslate}>
+                <LanguagesIcon /> Translate…
+              </button>
+              <button className={item} onClick={onProofread}>
+                <WandIcon /> Proofread / rewrite…
+              </button>
+              <button className={item} onClick={onPresentation}>
+                <ImageIcon /> Presentation figure
+              </button>
+              <div className="my-1 border-t border-gray-100" />
+              <button className={item} onClick={onCustom}>
+                <SparklesIcon /> Custom instruction…
+              </button>
+            </>
+          )}
+          {!isText && !isHeading && (
             <div className="px-2.5 py-1.5 text-sm text-ink-faint">
               Edit the Mermaid code below to update this diagram.
             </div>

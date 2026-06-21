@@ -10,6 +10,8 @@ export interface ChunkMetadata {
   level?: number; // 1–3 when chunkType === "heading"
   summary?: string;
   linkedChunks: string[];
+  imagePrompt?: string; // image chunks: prompt used, for "regenerate"
+  contentHistory?: string[]; // prior content values (text versions / image URLs)
 }
 
 export interface Chunk {
@@ -32,7 +34,8 @@ export interface Settings {
   models: string[]; // selectable text-model list (persisted)
   imageModel: string; // active image-generation model id
   imageModels: string[]; // selectable image-model list (persisted)
-  defaultTargetLanguage: string;
+  defaultTargetLanguage: string; // "Default language" — global output language
+  writingTone: string; // global writing tone applied to writing actions
   temperature: number;
 }
 
@@ -44,6 +47,7 @@ export type AiAction =
   | "detailed"
   | "concentrate"
   | "focus"
+  | "harmonize"
   | "custom";
 
 export interface AiRequest {
@@ -54,6 +58,8 @@ export interface AiRequest {
   targetLanguage?: string;
   style?: string; // target writing style for "proofread"
   instruction?: string;
+  outputLanguage?: string; // pin output to the configured default language
+  tone?: string; // global writing tone
 }
 
 export type AnalysisNodeKind = "paragraph" | "sentence";

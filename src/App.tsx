@@ -6,21 +6,23 @@ import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import { analyzeDocument } from "./aiActions";
 import {
-  draftDocument,
   exportDocument,
+  exportPdf,
   importDocument,
   openNative,
   saveNative,
 } from "./fileActions";
 import { useStore } from "./store";
 import { useShortcuts } from "./useShortcuts";
+import DraftModal from "./components/DraftModal";
 import Editor from "./components/Editor";
+import HelpModal from "./components/HelpModal";
 import SelectionBar from "./components/SelectionBar";
 import SettingsModal from "./components/SettingsModal";
 import TabBar from "./components/TabBar";
 import Toolbar from "./components/Toolbar";
 import Toasts from "./components/Toasts";
-import { PromptHost, promptDialog } from "./components/PromptModal";
+import { PromptHost } from "./components/PromptModal";
 
 // Cytoscape is heavy; load the network panel only when it is first opened.
 const NetworkPanel = lazy(() => import("./components/NetworkPanel"));
@@ -59,6 +61,9 @@ function App() {
         case "export_rtf":
           void exportDocument("rtf");
           break;
+        case "export_pdf":
+          void exportPdf();
+          break;
         case "undo":
           st.undo();
           break;
@@ -71,16 +76,12 @@ function App() {
         case "analyze":
           void analyzeDocument();
           break;
-        case "draft": {
-          const theme = await promptDialog({
-            title: "Draft a document",
-            label: "What theme / topic should I draft about?",
-            multiline: true,
-            submitLabel: "Draft",
-          });
-          if (theme && theme.trim()) void draftDocument(theme);
+        case "draft":
+          st.openDraft();
           break;
-        }
+        case "help":
+          st.openHelp();
+          break;
       }
     });
     return () => {
@@ -137,6 +138,8 @@ function App() {
       </div>
 
       <SettingsModal />
+      <DraftModal />
+      <HelpModal />
       <PromptHost />
       <SelectionBar />
       <Toasts />

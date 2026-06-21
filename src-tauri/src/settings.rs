@@ -15,9 +15,9 @@ pub const KEYRING_ACCOUNT: &str = "openrouter-api-key";
 pub const SETTINGS_FILE: &str = "settings.json";
 
 pub const DEFAULT_ENDPOINT: &str = "https://openrouter.ai/api/v1/chat/completions";
-/// A free OpenRouter model is used by default. Model availability on OpenRouter
-/// changes over time, so this is fully overridable from the Settings screen.
-pub const DEFAULT_MODEL: &str = "google/gemma-4-31b-it:free";
+/// The default text model. Model availability on OpenRouter changes over time,
+/// so this is fully overridable from the Settings screen.
+pub const DEFAULT_MODEL: &str = "deepseek/deepseek-v4-flash";
 
 /// Default image-generation model. NOTE: image model ids change over time on
 /// OpenRouter — these are starting points, fully editable from Settings.
@@ -27,8 +27,11 @@ pub const DEFAULT_IMAGE_MODEL: &str = "google/gemini-2.5-flash-image";
 /// Settings; ids may change over time on OpenRouter, so the list is editable.
 fn default_models() -> Vec<String> {
     vec![
-        DEFAULT_MODEL.to_string(),
-        "google/gemma-2-9b-it:free".to_string(),
+        DEFAULT_MODEL.to_string(), // deepseek/deepseek-v4-flash (default)
+        "qwen/qwen3.6-flash".to_string(),
+        "meta-llama/llama-4-maverick".to_string(),
+        "moonshotai/kimi-k2.5".to_string(),
+        "google/gemma-4-31b-it:free".to_string(),
         "meta-llama/llama-3.3-70b-instruct:free".to_string(),
         "deepseek/deepseek-r1:free".to_string(),
     ]
@@ -43,8 +46,46 @@ fn default_image_model() -> String {
 fn default_image_models() -> Vec<String> {
     vec![
         DEFAULT_IMAGE_MODEL.to_string(), // Nano Banana (Gemini 2.5 Flash Image)
+        "x-ai/grok-imagine-image-quality".to_string(),
+        "recraft/recraft-v4-pro".to_string(),
+        "openai/gpt-5.4-image-2".to_string(),
+        "black-forest-labs/flux.2-klein-4b".to_string(),
         "google/gemini-3-pro-image-preview".to_string(), // Nano Banana Pro (verify id)
     ]
+}
+
+/// Default writing tone (empty = the AI's neutral academic default). The
+/// Settings screen offers a small set of presets (blog / memo / report /
+/// scientific / academic-paper); the chosen tone is applied to every writing
+/// action so the whole document keeps a consistent voice.
+fn default_writing_tone() -> String {
+    String::new()
+}
+
+/// Best-effort default output language from the OS locale, so a Japanese (or
+/// other non-English) user isn't forced to English out of the box. Used only
+/// for a fresh install; fully overridable in Settings. Falls back to English.
+fn default_language() -> String {
+    let loc = std::env::var("LANG")
+        .or_else(|_| std::env::var("LC_ALL"))
+        .or_else(|_| std::env::var("LC_MESSAGES"))
+        .unwrap_or_default()
+        .to_lowercase();
+    let lang = loc.split(['_', '.', '-']).next().unwrap_or("");
+    match lang {
+        "ja" => "日本語",
+        "zh" => "中文",
+        "ko" => "한국어",
+        "es" => "Español",
+        "fr" => "Français",
+        "de" => "Deutsch",
+        "pt" => "Português",
+        "it" => "Italiano",
+        "ru" => "Русский",
+        "ar" => "العربية",
+        _ => "English",
+    }
+    .to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,7 +104,14 @@ pub struct Settings {
     /// The user's selectable image-model list.
     #[serde(default = "default_image_models")]
     pub image_models: Vec<String>,
+    /// The default output language for ALL AI actions (translate target plus the
+    /// language every other action writes its result in). Surfaced in Settings as
+    /// "Default language" — see the prompt assembly in `ai.rs`.
     pub default_target_language: String,
+    /// The global writing tone applied to writing actions (proofread/expand/…
+    /// and drafts). `#[serde(default)]` keeps older settings files loadable.
+    #[serde(default = "default_writing_tone")]
+    pub writing_tone: String,
     pub temperature: f32,
 }
 
@@ -75,7 +123,8 @@ impl Default for Settings {
             models: default_models(),
             image_model: default_image_model(),
             image_models: default_image_models(),
-            default_target_language: "English".to_string(),
+            default_target_language: default_language(),
+            writing_tone: default_writing_tone(),
             temperature: 0.3,
         }
     }

@@ -42,6 +42,24 @@ pub fn import_from_path(path: &str) -> AppResult<Document> {
     Ok(text_to_document(&title, &text))
 }
 
+/// Extract plain reference text from a file for use as Draft supporting
+/// material. Supports `.txt`/`.md`, `.rtf`, and best-effort `.pdf`.
+pub fn read_reference_text(path: &str) -> AppResult<String> {
+    let p = Path::new(path);
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    match ext.as_str() {
+        "txt" | "md" | "markdown" => Ok(std::fs::read_to_string(p)?),
+        "rtf" => Ok(rtf_to_text(&std::fs::read_to_string(p)?)),
+        "pdf" => pdf_extract::extract_text(p)
+            .map_err(|e| AppError::Other(format!("Could not extract text from PDF: {e}"))),
+        other => Err(AppError::UnsupportedFormat(other.to_string())),
+    }
+}
+
 /// If the first non-blank line is an ATX H1 (`# Heading`), return its text and
 /// the remaining document. Only a level-1 heading qualifies (`## ...` is body).
 fn strip_leading_h1(text: &str) -> Option<(String, String)> {

@@ -127,6 +127,7 @@ function applySnapshot(snap: TabSnapshot) {
     lastEditChunkId: snap.lastEditChunkId,
     flashChunkId: null,
     selectedChunkIds: [],
+    lastAiEditChunkId: null,
   };
 }
 
@@ -151,10 +152,16 @@ interface AppState {
   selectedChunkIds: string[]; // multi-select (e.g. for image generation)
   busyChunks: Record<string, boolean>;
   globalBusy: string | null; // label of an in-flight global operation
+  // Live streaming of a per-chunk AI action (translate/proofread/…): the chunk's
+  // real content is untouched until the stream finalises.
+  streamingChunkId: string | null;
+  streamingText: string;
 
   analysis: AnalysisResult | null;
   networkOpen: boolean;
   settingsOpen: boolean;
+  draftOpen: boolean;
+  helpOpen: boolean;
 
   toasts: Toast[];
 
@@ -162,6 +169,9 @@ interface AppState {
   past: Document[];
   future: Document[];
   lastEditChunkId: string | null;
+  // The chunk most recently replaced by an AI action — drives the transient
+  // "what changed" diff highlight after proofread/translate/etc.
+  lastAiEditChunkId: string | null;
 }
 
 interface AppActions {
@@ -174,6 +184,8 @@ interface AppActions {
 
   updateChunkContent: (id: string, content: string) => void;
   replaceChunkContent: (id: string, content: string) => void; // undoable (AI results)
+  selectChunkVersion: (id: string, value: string) => void; // swap to a saved version
+  dismissAiEdit: () => void; // clear the transient diff highlight
   setChunkSummary: (id: string, summary: string) => void;
   setChunkType: (id: string, type: ChunkType) => void;
   setHeadingLevel: (id: string, level: number) => void;
@@ -193,11 +205,18 @@ interface AppActions {
   clearSelection: () => void;
   setBusyChunk: (id: string, busy: boolean) => void;
   setGlobalBusy: (label: string | null) => void;
+  beginChunkStream: (id: string) => void;
+  updateChunkStream: (text: string) => void;
+  endChunkStream: () => void;
 
   setSettings: (settings: Settings) => void;
   setHasApiKey: (has: boolean) => void;
   openSettings: () => void;
   closeSettings: () => void;
+  openDraft: () => void;
+  closeDraft: () => void;
+  openHelp: () => void;
+  closeHelp: () => void;
 
   applyAnalysis: (result: AnalysisResult) => void;
   toggleNetwork: (open?: boolean) => void;
@@ -212,6 +231,8 @@ interface AppActions {
 }
 
 const MAX_HISTORY = 100;
+/** Max saved per-chunk content versions (text revisions / image URLs). */
+const VERSION_LIMIT = 20;
 let toastCounter = 0;
 
 function makeInitialDoc(): Document {
@@ -253,13 +274,18 @@ export const useStore = create<AppState & AppActions>((set, get) => {
     selectedChunkIds: [],
     busyChunks: {},
     globalBusy: null,
+    streamingChunkId: null,
+    streamingText: "",
     analysis: null,
     networkOpen: false,
     settingsOpen: false,
+    draftOpen: false,
+    helpOpen: false,
     toasts: [],
     past: [],
     future: [],
     lastEditChunkId: null,
+    lastAiEditChunkId: null,
 
     loadDocument: (doc, filePath = null) =>
       set({
@@ -273,6 +299,7 @@ export const useStore = create<AppState & AppActions>((set, get) => {
         analysis: doc.analysis ?? rebuildAnalysis(doc),
         focusedChunkId: doc.chunks[0]?.id ?? null,
         lastEditChunkId: null,
+        lastAiEditChunkId: null,
         selectedChunkIds: [],
       }),
 
@@ -298,6 +325,7 @@ export const useStore = create<AppState & AppActions>((set, get) => {
           analysis: null,
           focusedChunkId: fresh.chunks[0]?.id ?? null,
           lastEditChunkId: null,
+          lastAiEditChunkId: null,
           flashChunkId: null,
           selectedChunkIds: [],
         };
@@ -359,15 +387,70 @@ export const useStore = create<AppState & AppActions>((set, get) => {
           future: [],
           dirty: true,
           lastEditChunkId: id,
+          // Manual typing dismisses any pending AI-change highlight.
+          lastAiEditChunkId: null,
         };
       }),
 
+    // Replace a chunk's content (AI result). Saves the displaced value into the
+    // chunk's `contentHistory` so the previous version can be swapped back, and
+    // flags the chunk for the transient "what changed" highlight.
     replaceChunkContent: (id, content) =>
-      commit((doc) =>
-        mapChunks(doc, (chunks) =>
-          chunks.map((c) => (c.id === id ? { ...c, content } : c))
-        )
-      ),
+      set((state) => {
+        const snapshot = state.doc;
+        const next = mapChunks(snapshot, (chunks) =>
+          chunks.map((c) => {
+            if (c.id !== id) return c;
+            const old = c.content;
+            const hist = c.metadata.contentHistory ?? [];
+            const nextHist =
+              old.trim() && hist[hist.length - 1] !== old
+                ? [...hist, old].slice(-VERSION_LIMIT)
+                : hist;
+            return {
+              ...c,
+              content,
+              metadata: { ...c.metadata, contentHistory: nextHist },
+            };
+          })
+        );
+        const past = [...state.past, snapshot].slice(-MAX_HISTORY);
+        return {
+          doc: next,
+          past,
+          future: [],
+          dirty: true,
+          lastEditChunkId: null,
+          lastAiEditChunkId: id,
+        };
+      }),
+
+    // Swap a chunk to a saved version, keeping the displaced current value
+    // reachable in history (so swaps are reversible).
+    selectChunkVersion: (id, value) =>
+      set((state) => {
+        const snapshot = state.doc;
+        const next = mapChunks(snapshot, (chunks) =>
+          chunks.map((c) => {
+            if (c.id !== id || c.content === value) return c;
+            const cur = c.content;
+            const hist = c.metadata.contentHistory ?? [];
+            const nextHist =
+              cur.trim() && !hist.includes(cur)
+                ? [...hist, cur].slice(-VERSION_LIMIT)
+                : hist;
+            return {
+              ...c,
+              content: value,
+              metadata: { ...c.metadata, contentHistory: nextHist },
+            };
+          })
+        );
+        const past = [...state.past, snapshot].slice(-MAX_HISTORY);
+        return { doc: next, past, future: [], dirty: true, lastEditChunkId: null };
+      }),
+
+    dismissAiEdit: () => set({ lastAiEditChunkId: null }),
 
     setChunkSummary: (id, summary) =>
       // The summary is part of the persisted document model (spec §5), so this
@@ -473,14 +556,19 @@ export const useStore = create<AppState & AppActions>((set, get) => {
     },
 
     insertImageAfter: (id, url, prompt) => {
+      const full = prompt.trim();
       const newChunk: Chunk = {
         id: localId(),
         order: 0,
         content: url,
         metadata: {
           chunkType: "image",
-          summary: prompt.trim() || undefined,
+          summary: full ? full.slice(0, 200) : undefined,
+          // Keep the full prompt so the image can be regenerated, and start an
+          // empty version history (alternatives accumulate here).
+          imagePrompt: full || undefined,
           linkedChunks: [],
+          contentHistory: [],
         },
       };
       commit((doc) =>
@@ -607,11 +695,18 @@ export const useStore = create<AppState & AppActions>((set, get) => {
         return { busyChunks };
       }),
     setGlobalBusy: (label) => set({ globalBusy: label }),
+    beginChunkStream: (id) => set({ streamingChunkId: id, streamingText: "" }),
+    updateChunkStream: (text) => set({ streamingText: text }),
+    endChunkStream: () => set({ streamingChunkId: null, streamingText: "" }),
 
     setSettings: (settings) => set({ settings }),
     setHasApiKey: (has) => set({ hasApiKey: has }),
     openSettings: () => set({ settingsOpen: true }),
     closeSettings: () => set({ settingsOpen: false }),
+    openDraft: () => set({ draftOpen: true }),
+    closeDraft: () => set({ draftOpen: false }),
+    openHelp: () => set({ helpOpen: true }),
+    closeHelp: () => set({ helpOpen: false }),
 
     applyAnalysis: (result) =>
       set((state) => {

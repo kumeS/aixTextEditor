@@ -7,20 +7,33 @@
 // Selectors are per-chunk, so typing in one paragraph re-renders only this
 // component (Phase 5 performance goal).
 
-import { useEffect, useLayoutEffect, useRef } from "react";
-import { generateImageFromChunk, runChunkAction } from "../aiActions";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  generateImageFromChunk,
+  regenerateImageChunk,
+  runChunkAction,
+  speakChunk,
+  stopSpeaking,
+} from "../aiActions";
 import { caretVerticalEdge } from "../caret";
+import { changed, wordDiff } from "../diff";
 import { useStore } from "../store";
 import ChunkAiMenu from "./ChunkAiMenu";
 import MermaidChunk from "./MermaidChunk";
+import Tooltip from "./Tooltip";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
   CheckSquareIcon,
+  CloseIcon,
   FlowIcon,
+  HistoryIcon,
   ImageIcon,
   PlusIcon,
+  RegenerateIcon,
+  SpeakerIcon,
   SquareIcon,
+  StopIcon,
   SummaryIcon,
   TrashIcon,
 } from "./icons";
@@ -42,6 +55,8 @@ export default function ChunkView({ chunkId, index, total }: Props) {
   const busy = useStore((s) => !!s.busyChunks[chunkId]);
   const isFocused = useStore((s) => s.focusedChunkId === chunkId);
   const isFlashing = useStore((s) => s.flashChunkId === chunkId);
+  const isStreaming = useStore((s) => s.streamingChunkId === chunkId);
+  const streamingText = useStore((s) => (s.streamingChunkId === chunkId ? s.streamingText : ""));
 
   const updateChunkContent = useStore((s) => s.updateChunkContent);
   const setFocused = useStore((s) => s.setFocused);
@@ -55,9 +70,19 @@ export default function ChunkView({ chunkId, index, total }: Props) {
   const convertToHeading = useStore((s) => s.convertToHeading);
   const isSelected = useStore((s) => s.selectedChunkIds.includes(chunkId));
   const toggleSelectChunk = useStore((s) => s.toggleSelectChunk);
+  const selectChunkVersion = useStore((s) => s.selectChunkVersion);
+  const justAiEdited = useStore((s) => s.lastAiEditChunkId === chunkId);
+  const dismissAiEdit = useStore((s) => s.dismissAiEdit);
 
   const textRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  // Auto-open the "what changed" panel right after an AI edit.
+  const [showDiff, setShowDiff] = useState(false);
+  useEffect(() => {
+    if (justAiEdited) setShowDiff(true);
+  }, [justAiEdited]);
 
   // Auto-grow the textarea to fit its content.
   useLayoutEffect(() => {
@@ -94,6 +119,16 @@ export default function ChunkView({ chunkId, index, total }: Props) {
   const isHeading = type === "heading";
   const isImage = type === "image";
   const headingLevel = Math.min(Math.max(chunk.metadata.level ?? 1, 1), 3);
+
+  // Per-chunk version history (prior text revisions / image URLs).
+  const history = chunk.metadata.contentHistory ?? [];
+  const prevVersion = history.length ? history[history.length - 1] : null;
+  // All distinct image versions, newest (current) last, for the picker strip.
+  const imageVersions = isImage
+    ? Array.from(new Set([...history, chunk.content].filter(Boolean)))
+    : [];
+  const hasTextDiff =
+    (isText || isHeading) && !!prevVersion && changed(prevVersion, chunk.content);
 
   // Typing "# ", "## " or "### " at the start of a text chunk turns it into a
   // heading of that level (Markdown-style).
@@ -196,24 +231,28 @@ export default function ChunkView({ chunkId, index, total }: Props) {
       <div className="absolute -left-11 top-0 flex flex-col items-center opacity-0 pointer-events-none transition-opacity focus-within:opacity-100 data-[on=true]:opacity-100 data-[on=true]:pointer-events-auto"
         data-on={isFocused || busy}>
         {isHeading ? (
-          <div className="flex flex-col items-center gap-0.5">
-            {[1, 2, 3].map((lv) => (
-              <button
-                key={lv}
-                onClick={() => setHeadingLevel(chunkId, lv)}
-                title={`Heading level ${lv}`}
-                className={`h-5 w-6 rounded text-[11px] font-semibold ${
-                  headingLevel === lv
-                    ? "bg-accent/10 text-accent"
-                    : "text-ink-faint hover:bg-gray-100 hover:text-ink"
-                }`}
-              >
-                H{lv}
-              </button>
-            ))}
+          <div className="flex flex-col items-center gap-1">
+            {/* AI actions for the subtitle/heading, plus the H1/H2/H3 picker. */}
+            <ChunkAiMenu chunkId={chunkId} chunkType={type} busy={busy} />
+            <div className="flex flex-col items-center gap-0.5">
+              {[1, 2, 3].map((lv) => (
+                <Tooltip key={lv} label={`Set heading level ${lv}`}>
+                  <button
+                    onClick={() => setHeadingLevel(chunkId, lv)}
+                    className={`h-5 w-6 rounded text-[11px] font-semibold ${
+                      headingLevel === lv
+                        ? "bg-accent/10 text-accent"
+                        : "text-ink-faint hover:bg-gray-100 hover:text-ink"
+                    }`}
+                  >
+                    H{lv}
+                  </button>
+                </Tooltip>
+              ))}
+            </div>
           </div>
-        ) : (
-          <ChunkAiMenu chunkId={chunkId} isText={isText} busy={busy} />
+        ) : isImage ? null : (
+          <ChunkAiMenu chunkId={chunkId} chunkType={type} busy={busy} />
         )}
       </div>
       <div
@@ -245,37 +284,76 @@ export default function ChunkView({ chunkId, index, total }: Props) {
               {chunk.metadata.summary}
             </div>
           )}
+          {imageVersions.length > 1 && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <span className="text-xs text-ink-faint">Versions:</span>
+              {imageVersions.map((v, i) => (
+                <Tooltip
+                  key={v}
+                  label={v === chunk.content ? "Current version" : `Use version ${i + 1}`}
+                >
+                  <button
+                    onClick={() => selectChunkVersion(chunkId, v)}
+                    className={`h-10 w-10 overflow-hidden rounded border ${
+                      v === chunk.content
+                        ? "border-accent ring-1 ring-accent"
+                        : "border-gray-200 hover:border-accent"
+                    }`}
+                  >
+                    <img src={v} alt={`version ${i + 1}`} className="h-full w-full object-cover" />
+                  </button>
+                </Tooltip>
+              ))}
+            </div>
+          )}
         </div>
       ) : isHeading ? (
-        <textarea
-          ref={textRef}
-          value={chunk.content}
-          spellCheck
-          placeholder={`Heading ${headingLevel}`}
-          onFocus={() => setFocused(chunkId)}
-          onChange={(e) => updateChunkContent(chunkId, e.target.value)}
-          onKeyDown={onKeyDown}
-          rows={1}
-          className={`w-full resize-none overflow-hidden bg-transparent font-sans text-ink outline-none placeholder:text-ink-faint/40 ${
+        (() => {
+          const headingCls = `w-full resize-none overflow-hidden bg-transparent font-sans text-ink outline-none placeholder:text-ink-faint/40 ${
             headingLevel === 1
               ? "mt-3 text-3xl font-bold leading-tight"
               : headingLevel === 2
                 ? "mt-2 text-2xl font-bold leading-tight"
                 : "mt-1 text-xl font-semibold leading-snug"
-          }`}
-        />
+          }`;
+          return isStreaming ? (
+            <div className={`${headingCls} whitespace-pre-wrap break-words`}>
+              {streamingText}
+              <span className="ml-0.5 inline-block h-[1em] w-0.5 animate-pulse bg-accent align-middle" />
+            </div>
+          ) : (
+            <textarea
+              ref={textRef}
+              value={chunk.content}
+              spellCheck
+              placeholder={`Heading ${headingLevel}`}
+              onFocus={() => setFocused(chunkId)}
+              onChange={(e) => updateChunkContent(chunkId, e.target.value)}
+              onKeyDown={onKeyDown}
+              rows={1}
+              className={headingCls}
+            />
+          );
+        })()
       ) : isText ? (
-        <textarea
-          ref={textRef}
-          value={chunk.content}
-          spellCheck
-          placeholder={index === 0 ? "Start writing your first paragraph…" : "…"}
-          onFocus={() => setFocused(chunkId)}
-          onChange={(e) => handleTextChange(e.target.value)}
-          onKeyDown={onKeyDown}
-          rows={1}
-          className="w-full resize-none overflow-hidden bg-transparent font-serif text-[1.075rem] leading-8 text-ink-soft outline-none placeholder:text-ink-faint/50"
-        />
+        isStreaming ? (
+          <div className="w-full whitespace-pre-wrap break-words font-serif text-[1.075rem] leading-8 text-ink-soft">
+            {streamingText}
+            <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-accent align-middle" />
+          </div>
+        ) : (
+          <textarea
+            ref={textRef}
+            value={chunk.content}
+            spellCheck
+            placeholder={index === 0 ? "Start writing your first paragraph…" : "…"}
+            onFocus={() => setFocused(chunkId)}
+            onChange={(e) => handleTextChange(e.target.value)}
+            onKeyDown={onKeyDown}
+            rows={1}
+            className="w-full resize-none overflow-hidden bg-transparent font-serif text-[1.075rem] leading-8 text-ink-soft outline-none placeholder:text-ink-faint/50"
+          />
+        )
       ) : (
         <div>
           <MermaidChunk code={chunk.content} />
@@ -305,69 +383,186 @@ export default function ChunkView({ chunkId, index, total }: Props) {
         </div>
       )}
 
+      {/* Change highlight (after an AI edit) + version history for text/heading. */}
+      {(isText || isHeading) &&
+        (showDiff || showHistory) &&
+        (hasTextDiff || history.length > 0) && (
+          <div className="mt-1.5 rounded-md border border-gray-200 bg-gray-50/80 p-2">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-xs font-medium text-ink-soft">
+                {showDiff && hasTextDiff ? "What changed (vs previous)" : "Version history"}
+              </span>
+              <div className="flex items-center gap-2">
+                {prevVersion && (
+                  <button
+                    className="text-xs text-accent hover:underline"
+                    onClick={() => {
+                      selectChunkVersion(chunkId, prevVersion);
+                      setShowDiff(false);
+                      dismissAiEdit();
+                    }}
+                  >
+                    Revert
+                  </button>
+                )}
+                <button
+                  className="text-ink-faint hover:text-ink"
+                  aria-label="Dismiss"
+                  onClick={() => {
+                    setShowDiff(false);
+                    setShowHistory(false);
+                    dismissAiEdit();
+                  }}
+                >
+                  <CloseIcon className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            {showDiff && hasTextDiff && prevVersion ? (
+              <p className="font-serif text-[1.02rem] leading-7 text-ink-soft">
+                {wordDiff(prevVersion, chunk.content).map((op, i) =>
+                  op.type === "equal" ? (
+                    <span key={i}>{op.text}</span>
+                  ) : op.type === "insert" ? (
+                    <mark key={i} className="rounded bg-emerald-200/70 text-ink">
+                      {op.text}
+                    </mark>
+                  ) : (
+                    <span key={i} className="rounded bg-red-200/50 text-ink-faint line-through">
+                      {op.text}
+                    </span>
+                  )
+                )}
+              </p>
+            ) : (
+              <div className="space-y-1">
+                {history.length === 0 && (
+                  <div className="px-2 py-1 text-xs text-ink-faint">No earlier versions.</div>
+                )}
+                {[...history].reverse().map((v, i) => (
+                  <button
+                    key={`${i}-${v.slice(0, 12)}`}
+                    onClick={() => selectChunkVersion(chunkId, v)}
+                    className="block w-full truncate rounded px-2 py-1 text-left text-xs text-ink-soft hover:bg-white"
+                    title={v}
+                  >
+                    {v.trim().slice(0, 140) || "(empty)"}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
       {/* Right gutter: structural + image controls. Shown for the focused or
           selected chunk. */}
       <div
         className="absolute -right-11 top-0 flex flex-col gap-0.5 opacity-0 pointer-events-none transition-opacity focus-within:opacity-100 data-[on=true]:opacity-100 data-[on=true]:pointer-events-auto"
         data-on={isFocused || isSelected}
       >
-        <button
-          className={`${gutterBtn} ${isSelected ? "text-accent" : ""}`}
-          title={isSelected ? "Deselect paragraph" : "Select (for image gen)"}
-          aria-pressed={isSelected}
-          onClick={() => toggleSelectChunk(chunkId)}
-        >
-          {isSelected ? <CheckSquareIcon /> : <SquareIcon />}
-        </button>
-        {(isText || isHeading) && (
+        <Tooltip label={isSelected ? "Deselect paragraph" : "Select for batch edit / image generation"}>
           <button
-            className={`${gutterBtn} hover:text-accent`}
-            title="Generate image from this paragraph"
-            disabled={busy}
-            onClick={() => void generateImageFromChunk(chunkId)}
+            className={`${gutterBtn} ${isSelected ? "text-accent" : ""}`}
+            aria-pressed={isSelected}
+            onClick={() => toggleSelectChunk(chunkId)}
           >
-            <ImageIcon />
+            {isSelected ? <CheckSquareIcon /> : <SquareIcon />}
           </button>
+        </Tooltip>
+        {(isText || isHeading) && (
+          <Tooltip label={speaking ? "Stop reading" : "Read this paragraph aloud"}>
+            <button
+              className={`${gutterBtn} hover:text-accent ${speaking ? "text-accent" : ""}`}
+              onClick={() => {
+                if (speaking) {
+                  void stopSpeaking();
+                  setSpeaking(false);
+                } else {
+                  void speakChunk(chunkId);
+                  setSpeaking(true);
+                }
+              }}
+            >
+              {speaking ? <StopIcon /> : <SpeakerIcon />}
+            </button>
+          </Tooltip>
         )}
-        <button
-          className={gutterBtn}
-          title="Add paragraph below"
-          onClick={() => addChunkAfter(chunkId, "text")}
-        >
-          <PlusIcon />
-        </button>
-        <button
-          className={gutterBtn}
-          title="Move up"
-          disabled={index === 0}
-          onClick={() => moveChunk(chunkId, -1)}
-        >
-          <ArrowUpIcon />
-        </button>
-        <button
-          className={gutterBtn}
-          title="Move down"
-          disabled={index === total - 1}
-          onClick={() => moveChunk(chunkId, 1)}
-        >
-          <ArrowDownIcon />
-        </button>
-        {!isImage && (
+        {(isText || isHeading) && (
+          <Tooltip label="Generate an image from this paragraph">
+            <button
+              className={`${gutterBtn} hover:text-accent`}
+              disabled={busy}
+              onClick={() => void generateImageFromChunk(chunkId)}
+            >
+              <ImageIcon />
+            </button>
+          </Tooltip>
+        )}
+        {isImage && (
+          <Tooltip label="Regenerate this image (keeps previous versions)">
+            <button
+              className={`${gutterBtn} hover:text-accent`}
+              disabled={busy}
+              onClick={() => void regenerateImageChunk(chunkId)}
+            >
+              <RegenerateIcon />
+            </button>
+          </Tooltip>
+        )}
+        {(isText || isHeading) && history.length > 0 && (
+          <Tooltip label="Version history (swap to an earlier version)">
+            <button
+              className={`${gutterBtn} ${showHistory ? "text-accent" : ""}`}
+              onClick={() => {
+                setShowHistory((v) => !v);
+                setShowDiff(false);
+              }}
+            >
+              <HistoryIcon />
+            </button>
+          </Tooltip>
+        )}
+        <Tooltip label="Add a paragraph below">
+          <button className={gutterBtn} onClick={() => addChunkAfter(chunkId, "text")}>
+            <PlusIcon />
+          </button>
+        </Tooltip>
+        <Tooltip label="Move up">
           <button
             className={gutterBtn}
-            title={isText ? "Convert to diagram" : "Convert to text"}
-            onClick={() => setChunkType(chunkId, isText ? "diagram" : "text")}
+            disabled={index === 0}
+            onClick={() => moveChunk(chunkId, -1)}
           >
-            <FlowIcon />
+            <ArrowUpIcon />
           </button>
+        </Tooltip>
+        <Tooltip label="Move down">
+          <button
+            className={gutterBtn}
+            disabled={index === total - 1}
+            onClick={() => moveChunk(chunkId, 1)}
+          >
+            <ArrowDownIcon />
+          </button>
+        </Tooltip>
+        {!isImage && (
+          <Tooltip label={isText ? "Convert to diagram" : "Convert to text"}>
+            <button
+              className={gutterBtn}
+              onClick={() => setChunkType(chunkId, isText ? "diagram" : "text")}
+            >
+              <FlowIcon />
+            </button>
+          </Tooltip>
         )}
-        <button
-          className={`${gutterBtn} hover:text-red-500`}
-          title="Delete paragraph"
-          onClick={() => deleteChunk(chunkId)}
-        >
-          <TrashIcon />
-        </button>
+        <Tooltip label="Delete this paragraph">
+          <button
+            className={`${gutterBtn} hover:text-red-500`}
+            onClick={() => deleteChunk(chunkId)}
+          >
+            <TrashIcon />
+          </button>
+        </Tooltip>
       </div>
     </div>
   );
