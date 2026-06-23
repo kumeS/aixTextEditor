@@ -77,7 +77,7 @@
 ### 1. The writing canvas
 
 <div align="center">
-  <img src="docs/01.png" alt="aixTextEditor main window — a clean, distraction-free writing canvas with a minimal toolbar" width="720" />
+  <img src="docs/01.png" alt="aixTextEditor main window — a clean, distraction-free writing canvas with a minimal toolbar" width="560" />
 </div>
 
 > **A distraction-free, chunk-based canvas.** Every document is an ordered list of _chunks_ — paragraphs, headings, diagrams, images. The toolbar keeps the essentials one click away (**Open / Save**, **Import / Export**, **Undo / Redo**, **Draft by AI**, **Analyze**, **Help**) while the page itself stays quiet so you can focus on writing.
@@ -94,7 +94,7 @@
 ### 2. Draft → refine → review (the core workflow)
 
 <div align="center">
-  <img src="docs/demo.gif" alt="End-to-end demo: drafting a document with AI from a theme, then refining a paragraph and reviewing the inline diff" width="760" />
+  <img src="docs/demo.gif" alt="End-to-end demo: drafting a document with AI from a theme, then refining a paragraph and reviewing the inline diff" width="600" />
 </div>
 
 > **From a one-line theme to a polished draft — then sharpen it paragraph by paragraph.** The clip walks through the whole loop: generate a structured first draft, then use the per-chunk **✨** menu to revise, with every AI edit shown as a reviewable diff you can keep or undo.
@@ -113,7 +113,7 @@
 ### 3. Built-in guide (multilingual)
 
 <div align="center">
-  <img src="docs/02.png" alt="The in-app Help guide explaining the recommended writing workflow and API-key setup" width="430" />
+  <img src="docs/02.png" alt="The in-app Help guide explaining the recommended writing workflow and API-key setup" width="330" />
 </div>
 
 > **Help is always one click away.** The **Help** button (toolbar or native Help menu) opens a step-by-step guide to the recommended workflow, plus a one-time **API-key setup** walkthrough. The guide is available in **five languages — English, 日本語, 中文, Español, Français** — chosen from the selector beside the title, and it follows your **Default language** in Settings automatically.
