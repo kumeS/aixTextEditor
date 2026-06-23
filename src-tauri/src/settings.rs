@@ -135,10 +135,30 @@ impl Settings {
     /// when the file is absent or unreadable.
     pub fn load(config_dir: &Path) -> Self {
         let path = config_dir.join(SETTINGS_FILE);
-        std::fs::read_to_string(path)
+        let mut settings: Settings = std::fs::read_to_string(path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // Existing users have a saved `models`/`imageModels` list, so serde keeps
+        // that list and the new built-in defaults never appear. Merge in any
+        // pre-registered model that's missing, preserving the user's own
+        // additions and ordering.
+        settings.merge_default_models();
+        settings
+    }
+
+    /// Append any built-in default model that isn't already in the list.
+    fn merge_default_models(&mut self) {
+        for m in default_models() {
+            if !self.models.iter().any(|x| x == &m) {
+                self.models.push(m);
+            }
+        }
+        for m in default_image_models() {
+            if !self.image_models.iter().any(|x| x == &m) {
+                self.image_models.push(m);
+            }
+        }
     }
 
     pub fn save(&self, config_dir: &Path) -> AppResult<()> {

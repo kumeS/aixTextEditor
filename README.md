@@ -72,6 +72,60 @@
 
 <br/>
 
+## 📸 See it in action
+
+### 1. The writing canvas
+
+<div align="center">
+  <img src="docs/01.png" alt="aixTextEditor main window — a clean, distraction-free writing canvas with a minimal toolbar" width="720" />
+</div>
+
+> **A distraction-free, chunk-based canvas.** Every document is an ordered list of _chunks_ — paragraphs, headings, diagrams, images. The toolbar keeps the essentials one click away (**Open / Save**, **Import / Export**, **Undo / Redo**, **Draft by AI**, **Analyze**, **Help**) while the page itself stays quiet so you can focus on writing.
+
+**Quick start**
+
+1. Launch the app — a fresh **Untitled Document** opens automatically.
+2. Click the title to rename it, or just start typing in the first paragraph.
+3. Press **➕ Add paragraph** (or `⌘/Ctrl+Shift+Enter` to split at the caret) to grow the document chunk by chunk. Begin a line with `# `, `## ` or `### ` to turn it into a heading.
+4. Need another document? Open a new tab with the tab-bar **＋** or `⌘/Ctrl+T` — each tab keeps its own file, history and analysis.
+
+<br/>
+
+### 2. Draft → refine → review (the core workflow)
+
+<div align="center">
+  <img src="docs/demo.gif" alt="End-to-end demo: drafting a document with AI from a theme, then refining a paragraph and reviewing the inline diff" width="760" />
+</div>
+
+> **From a one-line theme to a polished draft — then sharpen it paragraph by paragraph.** The clip walks through the whole loop: generate a structured first draft, then use the per-chunk **✨** menu to revise, with every AI edit shown as a reviewable diff you can keep or undo.
+
+**Tutorial — follow along**
+
+1. **Draft the whole document.** Click **Draft by AI**, type a theme (here, _“BTC trend”_), pick an approximate length, and optionally attach reference text, a file (`.txt/.md/.rtf/.pdf`) or a URL. Hit **Draft** and the AI **streams** a structured first draft — headings + paragraphs — into a new tab (_“Draft created — 8 chunks”_).
+2. **Refine paragraph by paragraph.** Focus any paragraph and open the **✨** menu in the left gutter: **Translate**, **Proofread**, **Revise with context**, **Expand**, **Add detail**, **Concentrate**, **Focus**, **Summarize**, **Generate diagram**, or a **Custom instruction**. Each action reads the surrounding chunks so the result stays coherent.
+3. **Review the change.** Edits appear as an inline **diff** (_What changed vs previous_) — strikethrough for removals, highlight for additions. Keep it, hit **Revert**, or undo with `⌘/Ctrl+Z`.
+4. **Iterate** across chunks until it reads the way you want, then **Save** as `.aix` (lossless) or **Export** to `.txt/.md/.rtf`.
+
+> 💡 **Tip:** `⌘/Ctrl+Enter` runs a quick **Proofread** on the focused paragraph — the fastest way to tidy a single chunk.
+
+<br/>
+
+### 3. Built-in guide (multilingual)
+
+<div align="center">
+  <img src="docs/02.png" alt="The in-app Help guide explaining the recommended writing workflow and API-key setup" width="430" />
+</div>
+
+> **Help is always one click away.** The **Help** button (toolbar or native Help menu) opens a step-by-step guide to the recommended workflow, plus a one-time **API-key setup** walkthrough. The guide is available in **five languages — English, 日本語, 中文, Español, Français** — chosen from the selector beside the title, and it follows your **Default language** in Settings automatically.
+
+**Before your first AI action**
+
+1. Create a free key at **[openrouter.ai](https://openrouter.ai/keys)** (sign in → **Keys** → **Create Key**).
+2. Open **Settings** (gear icon, or `⌘/Ctrl+,`) and paste it under **OpenRouter API key** — it’s stored in the **macOS keychain**, never on disk in plaintext.
+3. _(Optional)_ Choose your text / image models and **Default language**. Prefer a local **Ollama** endpoint? Leave the key blank.
+
+<br/>
+
 ## Features
 
 | Area | What it does |

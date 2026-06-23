@@ -12,11 +12,11 @@ import { CloseIcon, DraftIcon, ImportIcon, NetworkIcon, SpinnerIcon } from "./ic
 
 // Approximate target lengths (in words). `null` lets the model choose.
 const LENGTHS: { label: string; value: number | null }[] = [
-  { label: "自動 / Auto", value: null },
-  { label: "短め / Short (~300)", value: 300 },
-  { label: "標準 / Medium (~800)", value: 800 },
-  { label: "長め / Long (~1500)", value: 1500 },
-  { label: "とても長い / Very long (~3000)", value: 3000 },
+  { label: "Auto", value: null },
+  { label: "Short (~300 words)", value: 300 },
+  { label: "Medium (~800 words)", value: 800 },
+  { label: "Long (~1500 words)", value: 1500 },
+  { label: "Very long (~3000 words)", value: 3000 },
 ];
 
 export default function DraftModal() {

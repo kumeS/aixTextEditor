@@ -67,7 +67,7 @@ export default function ChunkAiMenu({ chunkId, chunkType, busy }: Props) {
       title: "Translate paragraph",
       label: "Target language",
       defaultValue: defaultLang,
-      placeholder: "e.g. English, 日本語, Français",
+      placeholder: "e.g. English, Japanese, French",
       submitLabel: "Translate",
     });
     if (lang === null) return;
