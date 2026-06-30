@@ -9,6 +9,7 @@ import type {
   Document,
   DraftEvent,
   ExportFormat,
+  PptxReport,
   Settings,
 } from "./types";
 
@@ -18,6 +19,10 @@ export const api = {
 
   exportDocument: (document: Document, path: string, format: ExportFormat) =>
     invoke<void>("export_document", { document, path, format }),
+
+  /** Export the document as a PowerPoint deck (.pptx); returns a slide count + notes. */
+  exportPptx: (document: Document, path: string) =>
+    invoke<PptxReport>("export_pptx", { document, path }),
 
   saveDocumentJson: (document: Document, path: string) =>
     invoke<void>("save_document_json", { document, path }),

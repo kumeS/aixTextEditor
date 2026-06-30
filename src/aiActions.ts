@@ -6,15 +6,33 @@ import { api } from "./api";
 import { useStore } from "./store";
 import type { AiAction, Chunk } from "./types";
 
-function neighbours(chunkId: string): {
+// T1 — whole-document context assembly. Caps keep the prompt bounded on long docs.
+const DOC_MAP_MAX_LINES = 60;
+const DOC_MAP_MAX_CHARS = 3000;
+const LINKED_MAX_CHARS = 2500;
+
+/**
+ * Assemble the context an AI action gets for a chunk. Beyond the immediate
+ * preceding/following prose (spec §3.1), this now makes the model
+ * document-aware (T1): the SECTION the chunk lives under, a compact outline of
+ * the whole document (headings + per-chunk summaries), and the full text of any
+ * graph-linked chunks. This turns the latent summary/linkedChunks data — until
+ * now computed and saved but never fed back into editing — into editing context.
+ */
+function gatherContext(chunkId: string): {
   chunk: Chunk | undefined;
   before?: string;
   after?: string;
+  sectionHeading?: string;
+  documentMap?: string;
+  linkedContent?: string;
 } {
   const chunks = useStore.getState().doc.chunks;
   const idx = chunks.findIndex((c) => c.id === chunkId);
   const chunk = chunks[idx];
-  // Nearest preceding/following *text* chunk supplies context (spec §3.1).
+  if (!chunk) return { chunk };
+
+  // Nearest preceding/following *text* chunk supplies immediate context (§3.1).
   let before: string | undefined;
   for (let i = idx - 1; i >= 0; i--) {
     if (chunks[i].metadata.chunkType === "text" && chunks[i].content.trim()) {
@@ -29,7 +47,61 @@ function neighbours(chunkId: string): {
       break;
     }
   }
-  return { chunk, before, after };
+
+  // The section: nearest preceding heading.
+  let sectionHeading: string | undefined;
+  for (let i = idx - 1; i >= 0; i--) {
+    if (chunks[i].metadata.chunkType === "heading" && chunks[i].content.trim()) {
+      sectionHeading = chunks[i].content.trim();
+      break;
+    }
+  }
+
+  // A compact whole-document outline: headings + any per-chunk summaries.
+  const lines: string[] = [];
+  let mapChars = 0;
+  let hasContext = false;
+  for (let i = 0; i < chunks.length && lines.length < DOC_MAP_MAX_LINES; i++) {
+    if (i === idx) {
+      lines.push("- «the paragraph you are editing»");
+      continue;
+    }
+    const c = chunks[i];
+    let line: string | null = null;
+    if (c.metadata.chunkType === "heading" && c.content.trim()) {
+      const lvl = "#".repeat(Math.min(3, Math.max(1, c.metadata.level ?? 1)));
+      line = `${lvl} ${c.content.trim()}`;
+    } else if (c.metadata.summary && c.metadata.summary.trim()) {
+      line = `- ${c.metadata.summary.trim()}`;
+    }
+    if (line) {
+      if (mapChars + line.length > DOC_MAP_MAX_CHARS) break;
+      lines.push(line);
+      mapChars += line.length;
+      hasContext = true;
+    }
+  }
+  const documentMap = hasContext ? lines.join("\n") : undefined;
+
+  // Full content of graph-linked chunks (the supporting/related material).
+  let linkedContent: string | undefined;
+  const linked = chunk.metadata.linkedChunks ?? [];
+  if (linked.length) {
+    const byId = new Map(chunks.map((c) => [c.id, c]));
+    const parts: string[] = [];
+    let chars = 0;
+    for (const id of linked) {
+      const lc = byId.get(id);
+      if (!lc || lc.id === chunkId || !lc.content.trim()) continue;
+      const snippet = lc.content.trim().slice(0, 800);
+      if (chars + snippet.length > LINKED_MAX_CHARS) break;
+      parts.push(snippet);
+      chars += snippet.length;
+    }
+    if (parts.length) linkedContent = parts.join("\n\n---\n\n");
+  }
+
+  return { chunk, before, after, sectionHeading, documentMap, linkedContent };
 }
 
 function message(e: unknown): string {
@@ -65,6 +137,62 @@ function chunkStillActive(chunkId: string): boolean {
   return useStore.getState().doc.chunks.some((c) => c.id === chunkId);
 }
 
+/**
+ * Slide AI: rewrite a slide's prose into concise bullet points. Takes the
+ * slide's text-chunk ids, asks the model for short bullets, and replaces those
+ * chunks with one text chunk per bullet (each bullet = its own slide line).
+ */
+export async function bulletizeChunks(ids: string[]): Promise<void> {
+  const s = useStore.getState();
+  if (!ids.length) return;
+  if (!aiReady()) {
+    s.notify("Set your OpenRouter API key in Settings first.", "error");
+    s.openSettings();
+    return;
+  }
+  const tab = s.activeTabId;
+  const idSet = new Set(ids);
+  const texts = s.doc.chunks
+    .filter((c) => idSet.has(c.id) && c.metadata.chunkType === "text" && c.content.trim())
+    .map((c) => c.content.trim());
+  if (!texts.length) {
+    s.notify("This slide has no text to bulletize.", "info");
+    return;
+  }
+
+  s.setGlobalBusy("Bulletizing…");
+  try {
+    const result = await api.aiProcess({
+      action: "custom",
+      text: texts.join("\n\n"),
+      instruction:
+        "Rewrite the text as concise presentation bullet points. Output ONLY the bullets, " +
+        "one per line, each starting with '- '. Use 3 to 6 bullets, each a short phrase " +
+        "(not a full sentence). Keep the meaning faithful; do not invent facts. No title, no preamble.",
+      outputLanguage: s.settings?.defaultTargetLanguage,
+      tone: s.settings?.writingTone || undefined,
+    });
+    if (useStore.getState().activeTabId !== tab) {
+      s.notify("Switched tabs — bulletize discarded.", "info");
+      return;
+    }
+    const lines = result
+      .split("\n")
+      .map((l) => l.replace(/^\s*[-•*]\s*/, "").trim())
+      .filter(Boolean);
+    if (!lines.length) {
+      s.notify("The model returned no bullets.", "info");
+      return;
+    }
+    useStore.getState().replaceChunksWithTexts(ids, lines);
+    s.notify(`Bulletized into ${lines.length} points (⌘/Ctrl+Z to undo).`, "success");
+  } catch (e) {
+    s.notify(message(e), "error");
+  } finally {
+    useStore.getState().setGlobalBusy(null);
+  }
+}
+
 /** Translate / proofread / summarize / custom on a single chunk. */
 export async function runChunkAction(
   chunkId: string,
@@ -72,7 +200,9 @@ export async function runChunkAction(
   opts: { targetLanguage?: string; instruction?: string; style?: string } = {}
 ): Promise<void> {
   const s = useStore.getState();
-  const { chunk, before, after } = neighbours(chunkId);
+  const tab = s.activeTabId; // B3: scope live-stream mutations to the originating tab
+  const { chunk, before, after, sectionHeading, documentMap, linkedContent } =
+    gatherContext(chunkId);
   if (!chunk) return;
   if (!chunk.content.trim() && action !== "custom") {
     s.notify("This paragraph is empty.", "info");
@@ -97,6 +227,10 @@ export async function runChunkAction(
     // and apply the global writing tone.
     outputLanguage: s.settings?.defaultTargetLanguage,
     tone: s.settings?.writingTone || undefined,
+    // T1: document-wide awareness.
+    sectionHeading,
+    documentMap,
+    linkedContent,
   };
 
   // Stream every action except "summarize" (which writes metadata, not content).
@@ -106,8 +240,12 @@ export async function runChunkAction(
   try {
     const result = streaming
       ? await api.aiProcessStream(request, (text) => {
-          if (useStore.getState().streamingChunkId === chunkId) {
-            useStore.getState().updateChunkStream(text);
+          // Only paint while the originating tab is still active AND this is the
+          // chunk being streamed — so a backgrounded op can't hijack another
+          // tab's live streaming UI (B3).
+          const st = useStore.getState();
+          if (st.activeTabId === tab && st.streamingChunkId === chunkId) {
+            st.updateChunkStream(text);
           }
         })
       : await api.aiProcess(request);
@@ -130,7 +268,11 @@ export async function runChunkAction(
   } catch (e) {
     s.notify(message(e), "error");
   } finally {
-    if (streaming) useStore.getState().endChunkStream();
+    // B3: only clear the shared stream state if we still own the active tab,
+    // so finishing a backgrounded op doesn't kill the foreground tab's stream.
+    if (streaming && useStore.getState().activeTabId === tab) {
+      useStore.getState().endChunkStream();
+    }
     useStore.getState().setBusyChunk(chunkId, false);
   }
 }

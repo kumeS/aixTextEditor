@@ -4,9 +4,29 @@
 export type DiffOp = { type: "equal" | "insert" | "delete"; text: string };
 
 function tokenize(s: string): string[] {
-  // Split into words + following whitespace, keeping punctuation attached.
-  // Works for CJK too (each run between spaces is a token); good enough for a
-  // visual change highlight.
+  // Prefer locale-aware word segmentation so CJK prose (no inter-word spaces)
+  // diffs at word granularity. The old whitespace split collapsed an entire
+  // Japanese/Chinese paragraph into ONE token, so a one-character edit rendered
+  // as a full-paragraph delete+insert — visually useless for the primary
+  // (Japanese-academic) audience. Intl.Segmenter covers every character, so
+  // concatenating the tokens still reproduces the original text exactly.
+  type Segmenter = {
+    segment(input: string): Iterable<{ segment: string }>;
+  };
+  type SegmenterCtor = new (
+    locale?: string,
+    options?: { granularity?: "grapheme" | "word" | "sentence" }
+  ) => Segmenter;
+  const Seg = (Intl as unknown as { Segmenter?: SegmenterCtor }).Segmenter;
+  if (Seg) {
+    try {
+      const seg = new Seg(undefined, { granularity: "word" });
+      return Array.from(seg.segment(s), (x) => x.segment);
+    } catch {
+      // fall through to the regex tokenizer
+    }
+  }
+  // Fallback: split into words + following whitespace, keeping punctuation.
   return s.match(/\S+\s*|\s+/g) ?? [];
 }
 

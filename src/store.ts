@@ -10,13 +10,22 @@ import type {
   AnalysisResult,
   Chunk,
   ChunkType,
+  DocMode,
   Document,
   Settings,
+  SlideLayout,
 } from "./types";
 
 let idCounter = 0;
-/** Local id generator for chunks created on the frontend. */
+/**
+ * Id generator for chunks/documents created on the frontend. Uses UUIDs so ids
+ * match the Rust side (models.rs `new_id`) and stay stable across save/reload —
+ * a single, reproducible addressing scheme for agents (T2/AX). Falls back to a
+ * timestamp-counter scheme if `crypto.randomUUID` is unavailable.
+ */
 function localId(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c?.randomUUID) return c.randomUUID();
   idCounter += 1;
   return `c-${Date.now().toString(36)}-${idCounter}`;
 }
@@ -175,9 +184,13 @@ interface AppState {
 }
 
 interface AppActions {
-  loadDocument: (doc: Document, filePath?: string | null) => void;
+  loadDocument: (
+    doc: Document,
+    filePath?: string | null,
+    opts?: { dirty?: boolean }
+  ) => void;
   setStreamingDocument: (doc: Document) => void;
-  newTab: () => void;
+  newTab: (mode?: DocMode) => void;
   switchTab: (id: string) => void;
   closeTab: (id: string) => void;
   setTitle: (title: string) => void;
@@ -198,6 +211,12 @@ interface AppActions {
   deleteChunk: (id: string) => void;
   mergeWithPrevious: (id: string) => string | null;
   moveChunk: (id: string, dir: -1 | 1) => void;
+  // Slide-level structural ops (slide editor).
+  setChunkOrder: (orderedIds: string[]) => void;
+  deleteChunks: (ids: string[]) => void;
+  duplicateChunksAfter: (ids: string[]) => string[];
+  setChunkLayout: (id: string, layout: SlideLayout) => void;
+  replaceChunksWithTexts: (ids: string[], texts: string[]) => void;
 
   setFocused: (id: string | null) => void;
   flashChunk: (id: string) => void;
@@ -235,12 +254,15 @@ const MAX_HISTORY = 100;
 const VERSION_LIMIT = 20;
 let toastCounter = 0;
 
-function makeInitialDoc(): Document {
+function makeInitialDoc(mode: DocMode = "editor"): Document {
   return {
     id: localId(),
     // Empty title: the editor shows a grayed placeholder until the user types.
     title: "",
-    chunks: [emptyChunk(0)],
+    mode,
+    // A slide deck starts with one slide (a heading = the first slide's title);
+    // an editor doc starts with one empty paragraph.
+    chunks: [emptyChunk(0, mode === "slide" ? "heading" : "text")],
   };
 }
 
@@ -287,11 +309,14 @@ export const useStore = create<AppState & AppActions>((set, get) => {
     lastEditChunkId: null,
     lastAiEditChunkId: null,
 
-    loadDocument: (doc, filePath = null) =>
+    loadDocument: (doc, filePath = null, opts) =>
       set({
         doc,
         filePath,
-        dirty: false,
+        // B2: drafted/imported docs have no backing file and are unsaved, so they
+        // must be dirty — otherwise the tab/quit guards treat irreproducible AI
+        // drafts as "clean" and discard them silently.
+        dirty: opts?.dirty ?? false,
         past: [],
         future: [],
         // Prefer the persisted full graph (paragraph + sentence nodes); fall back
@@ -309,10 +334,10 @@ export const useStore = create<AppState & AppActions>((set, get) => {
     setStreamingDocument: (doc) => set({ doc }),
 
     // ----- tabs: active tab lives in top-level fields; others as snapshots -----
-    newTab: () =>
+    newTab: (mode = "editor") =>
       set((s) => {
         const id = localId();
-        const fresh = makeInitialDoc();
+        const fresh = makeInitialDoc(mode);
         return {
           inactiveTabs: { ...s.inactiveTabs, [s.activeTabId]: snapshotActive(s) },
           tabOrder: [...s.tabOrder, id],
@@ -648,6 +673,109 @@ export const useStore = create<AppState & AppActions>((set, get) => {
       );
       set({ focusedChunkId: caretTarget });
       return caretTarget;
+    },
+
+    // ----- slide-level structural ops (used by the slide editor) -----
+    // Reorder the whole chunk list to match `orderedIds` (chunks not listed are
+    // appended in their existing order, as a safety net). Undoable.
+    setChunkOrder: (orderedIds) =>
+      commit((doc) =>
+        mapChunks(doc, (chunks) => {
+          const byId = new Map(chunks.map((c) => [c.id, c] as const));
+          const ordered: Chunk[] = [];
+          for (const id of orderedIds) {
+            const c = byId.get(id);
+            if (c) ordered.push(c);
+          }
+          if (ordered.length !== chunks.length) {
+            const seen = new Set(orderedIds);
+            for (const c of chunks) if (!seen.has(c.id)) ordered.push(c);
+          }
+          return reindex(ordered);
+        })
+      ),
+
+    // Delete a set of chunks at once (e.g. a whole slide). Keeps ≥1 chunk.
+    deleteChunks: (ids) => {
+      const idSet = new Set(ids);
+      const chunks = get().doc.chunks;
+      const firstIdx = chunks.findIndex((c) => idSet.has(c.id));
+      if (firstIdx < 0) return;
+      const remaining = chunks.filter((c) => !idSet.has(c.id));
+      if (remaining.length === 0) {
+        const replacement = emptyChunk(0);
+        commit((doc) => mapChunks(doc, () => [replacement]));
+        set({ focusedChunkId: replacement.id, selectedChunkIds: [] });
+        return;
+      }
+      const neighbour = chunks[firstIdx - 1] ?? remaining[0];
+      commit((doc) =>
+        mapChunks(doc, (cs) => reindex(cs.filter((c) => !idSet.has(c.id))))
+      );
+      set({ focusedChunkId: neighbour ? neighbour.id : null, selectedChunkIds: [] });
+    },
+
+    // Clone the given chunks (fresh ids) and insert them right after the last of
+    // them — used to duplicate a slide. Graph links/history are not carried over.
+    duplicateChunksAfter: (ids) => {
+      const idSet = new Set(ids);
+      const chunks = get().doc.chunks;
+      const group = chunks.filter((c) => idSet.has(c.id));
+      if (group.length === 0) return [];
+      const clones: Chunk[] = group.map((c) => ({
+        ...c,
+        id: localId(),
+        metadata: { ...c.metadata, linkedChunks: [], contentHistory: undefined },
+      }));
+      const lastId = group[group.length - 1].id;
+      commit((doc) =>
+        mapChunks(doc, (cs) => {
+          const idx = cs.findIndex((c) => c.id === lastId);
+          const next = [...cs];
+          next.splice(idx + 1, 0, ...clones);
+          return reindex(next);
+        })
+      );
+      set({ focusedChunkId: clones[0]?.id ?? null });
+      return clones.map((c) => c.id);
+    },
+
+    // Set an explicit slide-layout override on a (heading) chunk.
+    setChunkLayout: (id, layout) =>
+      commit((doc) =>
+        mapChunks(doc, (chunks) =>
+          chunks.map((c) =>
+            c.id === id ? { ...c, metadata: { ...c.metadata, layout } } : c
+          )
+        )
+      ),
+
+    // Replace a set of chunks with fresh text chunks (one per string), inserted
+    // at the position of the first removed chunk. Used by AI "Bulletize" to turn
+    // a slide's prose into separate bullet chunks. Keeps ≥1 chunk overall.
+    replaceChunksWithTexts: (ids, texts) => {
+      const idSet = new Set(ids);
+      const newChunks: Chunk[] = texts.map((t) => ({ ...emptyChunk(0), content: t }));
+      commit((doc) =>
+        mapChunks(doc, (cs) => {
+          const next: Chunk[] = [];
+          let inserted = false;
+          for (const c of cs) {
+            if (idSet.has(c.id)) {
+              if (!inserted) {
+                next.push(...newChunks);
+                inserted = true;
+              }
+            } else {
+              next.push(c);
+            }
+          }
+          if (!inserted) next.push(...newChunks);
+          if (next.length === 0) next.push(emptyChunk(0));
+          return reindex(next);
+        })
+      );
+      set({ focusedChunkId: newChunks[0]?.id ?? null });
     },
 
     moveChunk: (id, dir) =>

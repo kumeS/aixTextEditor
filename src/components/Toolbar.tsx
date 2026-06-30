@@ -6,6 +6,7 @@ import { analyzeDocument } from "../aiActions";
 import {
   exportDocument,
   exportPdf,
+  exportPptx,
   importDocument,
   openNative,
   saveNative,
@@ -87,6 +88,10 @@ export default function Toolbar() {
     setFileMenuOpen(false);
     void exportPdf();
   };
+  const doExportPptx = () => {
+    setFileMenuOpen(false);
+    void exportPptx();
+  };
 
   return (
     <header className="sticky top-0 z-20 flex items-center gap-1 border-b border-gray-200 bg-white/90 px-3 py-1.5 backdrop-blur">
@@ -127,6 +132,12 @@ export default function Toolbar() {
                   <ExportIcon className="h-4 w-4" /> .{fmt}
                 </button>
               ))}
+              <button
+                onClick={doExportPptx}
+                className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-sm text-ink-soft hover:bg-gray-100"
+              >
+                <ExportIcon className="h-4 w-4" /> .pptx
+              </button>
               <button
                 onClick={doExportPdf}
                 className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-sm text-ink-soft hover:bg-gray-100"

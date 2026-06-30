@@ -38,6 +38,9 @@ thiserror = "2"
 tokio = { version = "1", features = ["time"] }
 # Best-effort text extraction from PDF reference material (Draft attachments).
 pdf-extract = "0.7"
+# PPTX (Open XML) export: write the .pptx zip and decode image data URLs.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+base64 = "0.22"
 
 [profile.release]
 # Smaller, faster-to-ship desktop binaries.

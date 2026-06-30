@@ -13,6 +13,13 @@ use tauri::{App, Runtime};
 pub fn build<R: Runtime>(app: &App<R>) -> tauri::Result<Menu<R>> {
     // App menu (shows as the app menu on macOS).
     let settings = MenuItemBuilder::with_id("settings", "Settings…").build(app)?;
+    // Custom Quit (NOT the predefined .quit()) so it emits "menu"→"quit" and the
+    // frontend can run the unsaved-changes guard before the app exits. It keeps
+    // the conventional Cmd+Q accelerator; there is no frontend Cmd+Q shortcut, so
+    // it does not double-fire.
+    let quit = MenuItemBuilder::with_id("quit", "Quit aixTextEditor")
+        .accelerator("CmdOrCtrl+Q")
+        .build(app)?;
     let app_menu = SubmenuBuilder::new(app, "aixTextEditor")
         .about(Some(AboutMetadata {
             name: Some("aixTextEditor".into()),
@@ -26,7 +33,8 @@ pub fn build<R: Runtime>(app: &App<R>) -> tauri::Result<Menu<R>> {
         .item(&settings)
         .separator()
         .hide()
-        .quit()
+        .separator()
+        .item(&quit)
         .build()?;
 
     // File

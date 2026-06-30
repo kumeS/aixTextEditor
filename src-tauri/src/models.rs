@@ -49,6 +49,11 @@ pub struct ChunkMetadata {
     /// earlier version. The current value lives in `Chunk::content`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub content_history: Vec<String>,
+    /// For a HEADING chunk that begins a slide: an explicit slide-layout override
+    /// ("section" | "title-content" | "title-image"). When absent, the layout is
+    /// auto-picked from the slide's content (see `deck.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<String>,
 }
 
 fn default_chunk_type() -> String {
@@ -65,6 +70,7 @@ impl Default for ChunkMetadata {
             linked_chunks: Vec::new(),
             image_prompt: None,
             content_history: Vec::new(),
+            layout: None,
         }
     }
 }
@@ -102,6 +108,7 @@ impl Chunk {
                 linked_chunks: Vec::new(),
                 image_prompt: None,
                 content_history: Vec::new(),
+                layout: None,
             },
         }
     }
@@ -120,6 +127,7 @@ impl Chunk {
                 linked_chunks: Vec::new(),
                 image_prompt: None,
                 content_history: Vec::new(),
+                layout: None,
             },
         }
     }
@@ -137,12 +145,27 @@ impl Chunk {
     }
 }
 
+/// Authoring mode, fixed at creation: "editor" (prose document) or "slide"
+/// (a deck). Persisted so a saved deck reopens as a deck.
+pub const DOC_MODE_EDITOR: &str = "editor";
+/// The "slide" mode literal — set on the frontend; kept here as the documented
+/// contract for the field's valid values.
+#[allow(dead_code)]
+pub const DOC_MODE_SLIDE: &str = "slide";
+
+fn default_doc_mode() -> String {
+    DOC_MODE_EDITOR.to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Document {
     pub id: String,
     pub title: String,
     pub chunks: Vec<Chunk>,
+    /// "editor" | "slide". Older .aix files without it load as "editor".
+    #[serde(default = "default_doc_mode")]
+    pub mode: String,
     /// Persisted relationship graph (spec §3.4) so it survives save/reopen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub analysis: Option<AnalysisResult>,
@@ -154,7 +177,71 @@ impl Document {
             id: new_id(),
             title: title.to_string(),
             chunks: Vec::new(),
+            mode: default_doc_mode(),
             analysis: None,
+        }
+    }
+}
+
+// ----- slide deck model (v1.2.0) -------------------------------------------
+//
+// A `Deck` is an ordered list of `Slide`s; a slide is a `layout` plus a small
+// group of the same `Chunk`s used by the text editor (heading = title,
+// text = bullets, image, diagram), so every per-chunk AI action works inside
+// slides unchanged. Decks are export-only to `.pptx` for now (see `pptx.rs`);
+// `deck::document_to_deck` derives one from a text document.
+
+pub const SLIDE_LAYOUT_SECTION: &str = "section";
+pub const SLIDE_LAYOUT_TITLE_CONTENT: &str = "title-content";
+pub const SLIDE_LAYOUT_TITLE_IMAGE: &str = "title-image";
+
+fn default_layout() -> String {
+    SLIDE_LAYOUT_TITLE_CONTENT.to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Slide {
+    pub id: String,
+    pub order: u32,
+    /// "section" | "title-content" | "title-image".
+    #[serde(default = "default_layout")]
+    pub layout: String,
+    /// Reused editor chunks: heading = title, text = bullets, image, diagram.
+    #[serde(default)]
+    pub chunks: Vec<Chunk>,
+    /// Speaker notes (not yet emitted to PPTX; reserved for a later phase).
+    #[serde(default)]
+    pub notes: String,
+}
+
+impl Slide {
+    pub fn new(order: u32, layout: impl Into<String>) -> Self {
+        Self {
+            id: new_id(),
+            order,
+            layout: layout.into(),
+            chunks: Vec::new(),
+            notes: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Deck {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub slides: Vec<Slide>,
+}
+
+impl Deck {
+    pub fn new(title: &str) -> Self {
+        Self {
+            id: new_id(),
+            title: title.to_string(),
+            slides: Vec::new(),
         }
     }
 }

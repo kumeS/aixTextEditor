@@ -203,7 +203,7 @@ impl OpenRouterProvider {
                 };
                 let data = data.trim();
                 if data == "[DONE]" {
-                    return Ok(full);
+                    return finalize_stream(full);
                 }
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
                     if let Some(delta) = v["choices"][0]["delta"]["content"].as_str() {
@@ -215,8 +215,21 @@ impl OpenRouterProvider {
                 }
             }
         }
-        Ok(full)
+        finalize_stream(full)
     }
+}
+
+/// Guard the streaming path against an empty result (content-filtered response,
+/// early close before any delta, or only role/usage chunks) — mirroring the
+/// non-streaming `complete()` so an empty stream never silently clobbers the
+/// user's paragraph with "".
+fn finalize_stream(full: String) -> AppResult<String> {
+    if full.trim().is_empty() {
+        return Err(AppError::Network(
+            "The model returned an empty response. Try again, or switch models in Settings.".into(),
+        ));
+    }
+    Ok(full)
 }
 
 // ----- request / result types --------------------------------------------
@@ -250,6 +263,20 @@ pub struct AiRequest {
     /// Applied to the open-ended writing actions for a consistent voice.
     #[serde(default)]
     pub tone: Option<String>,
+    /// The nearest preceding heading — the SECTION the target paragraph lives
+    /// under. Lets the model edit with awareness of where it is in the document
+    /// (T1: whole-document context assembly).
+    #[serde(default)]
+    pub section_heading: Option<String>,
+    /// A compact document outline: one line per other chunk (its summary, or a
+    /// trimmed snippet). Gives the model document-wide awareness without sending
+    /// the full text. Assembled on the frontend from metadata.summary.
+    #[serde(default)]
+    pub document_map: Option<String>,
+    /// Full content of the chunks this paragraph is graph-linked to
+    /// (metadata.linkedChunks) — the supporting/related material.
+    #[serde(default)]
+    pub linked_content: Option<String>,
 }
 
 /// Trailing constraints appended to a writing action's system prompt: pin the
@@ -277,16 +304,21 @@ fn output_constraints(language: Option<&str>, tone: Option<&str>) -> String {
 
 fn context_block(req: &AiRequest) -> String {
     let mut ctx = String::new();
-    if let Some(before) = req.context_before.as_ref().filter(|s| !s.trim().is_empty()) {
-        ctx.push_str("[Preceding paragraph]\n");
-        ctx.push_str(before.trim());
-        ctx.push_str("\n\n");
-    }
-    if let Some(after) = req.context_after.as_ref().filter(|s| !s.trim().is_empty()) {
-        ctx.push_str("[Following paragraph]\n");
-        ctx.push_str(after.trim());
-        ctx.push_str("\n\n");
-    }
+    let push = |ctx: &mut String, label: &str, body: &Option<String>| {
+        if let Some(v) = body.as_ref().filter(|s| !s.trim().is_empty()) {
+            ctx.push_str(label);
+            ctx.push('\n');
+            ctx.push_str(v.trim());
+            ctx.push_str("\n\n");
+        }
+    };
+    // T1: document-wide awareness — which section, the whole-doc outline, and the
+    // graph-linked material — in addition to the immediate prose neighbours.
+    push(&mut ctx, "[Section this paragraph belongs to]", &req.section_heading);
+    push(&mut ctx, "[Document outline (other paragraphs, for orientation only)]", &req.document_map);
+    push(&mut ctx, "[Preceding paragraph]", &req.context_before);
+    push(&mut ctx, "[Following paragraph]", &req.context_after);
+    push(&mut ctx, "[Related/linked material]", &req.linked_content);
     ctx
 }
 

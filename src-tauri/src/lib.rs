@@ -1,11 +1,14 @@
 //! aixTextEditor — Tauri backend entry point.
 
 mod ai;
+pub mod cli;
 mod commands;
+mod deck;
 mod error;
 mod fileio;
 mod menu;
 mod models;
+mod pptx;
 mod settings;
 
 use tauri::Emitter;
@@ -27,6 +30,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::import_document,
             commands::export_document,
+            commands::export_pptx,
             commands::save_document_json,
             commands::open_document_json,
             commands::get_settings,

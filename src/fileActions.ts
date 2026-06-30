@@ -18,11 +18,16 @@ function safeName(title: string): string {
   return base.replace(/[\\/:*?"<>|]/g, "_");
 }
 
-/** True if the active tab is an untouched blank document we can reuse. */
+/**
+ * True if the active tab is an untouched blank EDITOR document we can reuse.
+ * Slide-mode tabs are never reused for opened/imported/drafted (editor) content,
+ * so a tab's mode stays fixed for its lifetime.
+ */
 function activeIsPristine(): boolean {
   const s = useStore.getState();
   const c = s.doc.chunks;
   return (
+    (s.doc.mode ?? "editor") === "editor" &&
     !s.dirty &&
     !s.filePath &&
     c.length === 1 &&
@@ -31,9 +36,9 @@ function activeIsPristine(): boolean {
 }
 
 /** Open a document in a new tab (or reuse the current blank one). */
-function openInTab(doc: Document, filePath: string | null): void {
+function openInTab(doc: Document, filePath: string | null, dirty = false): void {
   if (!activeIsPristine()) useStore.getState().newTab();
-  useStore.getState().loadDocument(doc, filePath);
+  useStore.getState().loadDocument(doc, filePath, { dirty });
 }
 
 /**
@@ -64,7 +69,9 @@ export async function draftDocument(
       if (e.kind === "update") {
         useStore.getState().setStreamingDocument(e.document);
       } else if (e.kind === "done") {
-        useStore.getState().loadDocument(e.document, null);
+        // B2: a fresh AI draft is unsaved & irreproducible — mark it dirty so the
+        // tab/quit guards protect it.
+        useStore.getState().loadDocument(e.document, null, { dirty: true });
       }
     });
     if (onDraftTab()) {
@@ -89,7 +96,7 @@ export async function importDocument(): Promise<void> {
     });
     if (typeof selected !== "string") return;
     const doc = await api.importDocument(selected);
-    openInTab(doc, null);
+    openInTab(doc, null, true); // imported doc has no .aix backing → dirty (B2)
     useStore.getState().notify("Document imported.", "success");
   } catch (e) {
     useStore.getState().notify(message(e), "error");
@@ -229,6 +236,33 @@ export async function exportDocument(format: ExportFormat): Promise<void> {
     if (!path) return;
     await api.exportDocument(s.doc, path, format);
     s.notify(`Exported as ${format.toUpperCase()}.`, "success");
+  } catch (e) {
+    s.notify(message(e), "error");
+  }
+}
+
+/**
+ * Export the document as a PowerPoint deck (.pptx). The document is turned into
+ * slides on the Rust side (headings → slides, paragraphs → bullets, images
+ * embedded); this only picks the destination path.
+ */
+export async function exportPptx(): Promise<void> {
+  const s = useStore.getState();
+  try {
+    const path = await save({
+      defaultPath: `${safeName(s.doc.title)}.pptx`,
+      filters: [{ name: "PowerPoint", extensions: ["pptx"] }],
+    });
+    if (!path) return;
+    const report = await api.exportPptx(s.doc, path);
+    if (report.warnings.length > 0) {
+      s.notify(
+        `Exported ${report.slides} slide(s) as PPTX. ${report.warnings.join(" ")}`,
+        "info"
+      );
+    } else {
+      s.notify(`Exported ${report.slides} slide(s) as PPTX.`, "success");
+    }
   } catch (e) {
     s.notify(message(e), "error");
   }

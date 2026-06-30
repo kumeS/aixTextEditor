@@ -12,6 +12,7 @@ export interface ChunkMetadata {
   linkedChunks: string[];
   imagePrompt?: string; // image chunks: prompt used, for "regenerate"
   contentHistory?: string[]; // prior content values (text versions / image URLs)
+  layout?: SlideLayout; // heading chunks: explicit slide-layout override
 }
 
 export interface Chunk {
@@ -21,11 +22,43 @@ export interface Chunk {
   metadata: ChunkMetadata;
 }
 
+/**
+ * Authoring mode of a document/tab. Chosen when the tab is created and FIXED for
+ * its lifetime — an editor doc and a slide deck are independent things, never
+ * converted into each other. Older .aix files without the field load as "editor".
+ */
+export type DocMode = "editor" | "slide";
+
 export interface Document {
   id: string;
   title: string;
   chunks: Chunk[];
+  mode?: DocMode; // defaults to "editor" when absent (back-compat)
   analysis?: AnalysisResult; // persisted relationship graph (spec §3.4)
+}
+
+// Slide deck model (v1.2.0). A slide reuses editor Chunks (heading = title,
+// text = bullets, image, diagram) plus a layout; decks export to .pptx.
+export type SlideLayout = "section" | "title-content" | "title-image";
+
+export interface Slide {
+  id: string;
+  order: number;
+  layout: SlideLayout;
+  chunks: Chunk[];
+  notes: string; // speaker notes (reserved; not yet emitted to PPTX)
+}
+
+export interface Deck {
+  id: string;
+  title: string;
+  slides: Slide[];
+}
+
+/** Result of a PPTX export: slide count and any non-fatal notes. */
+export interface PptxReport {
+  slides: number;
+  warnings: string[];
 }
 
 export interface Settings {
@@ -60,6 +93,11 @@ export interface AiRequest {
   instruction?: string;
   outputLanguage?: string; // pin output to the configured default language
   tone?: string; // global writing tone
+  // T1 — whole-document context: the section heading the chunk lives under, a
+  // compact document outline (headings + summaries), and graph-linked material.
+  sectionHeading?: string;
+  documentMap?: string;
+  linkedContent?: string;
 }
 
 export type AnalysisNodeKind = "paragraph" | "sentence";

@@ -3,6 +3,8 @@
 
 import { Suspense, lazy, useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import { analyzeDocument } from "./aiActions";
 import {
@@ -16,6 +18,7 @@ import { useStore } from "./store";
 import { useShortcuts } from "./useShortcuts";
 import DraftModal from "./components/DraftModal";
 import Editor from "./components/Editor";
+import SlideEditor from "./components/SlideEditor";
 import HelpModal from "./components/HelpModal";
 import SelectionBar from "./components/SelectionBar";
 import SettingsModal from "./components/SettingsModal";
@@ -27,8 +30,33 @@ import { PromptHost } from "./components/PromptModal";
 // Cytoscape is heavy; load the network panel only when it is first opened.
 const NetworkPanel = lazy(() => import("./components/NetworkPanel"));
 
+/** True if any tab (active or backgrounded) has unsaved changes. */
+function anyTabDirty(): boolean {
+  const st = useStore.getState();
+  return st.dirty || Object.values(st.inactiveTabs).some((t) => t.dirty);
+}
+
+/**
+ * Ask before discarding unsaved work. Returns true if it is safe to close
+ * (nothing dirty, or the user confirmed). Used by both the window-close path
+ * and the app Quit menu so neither can silently lose unsaved tabs (B1).
+ */
+async function okToClose(): Promise<boolean> {
+  if (!anyTabDirty()) return true;
+  return ask(
+    "You have unsaved changes in one or more tabs. Quit without saving? Unsaved documents (including AI drafts) will be lost.",
+    {
+      title: "Unsaved changes",
+      kind: "warning",
+      okLabel: "Discard & quit",
+      cancelLabel: "Cancel",
+    }
+  );
+}
+
 function App() {
   const networkOpen = useStore((s) => s.networkOpen);
+  const mode = useStore((s) => s.doc.mode ?? "editor");
   const setSettings = useStore((s) => s.setSettings);
   const setHasApiKey = useStore((s) => s.setHasApiKey);
   const notify = useStore((s) => s.notify);
@@ -82,7 +110,25 @@ function App() {
         case "help":
           st.openHelp();
           break;
+        case "quit":
+          if (await okToClose()) await getCurrentWindow().destroy();
+          break;
       }
+    });
+    return () => {
+      void unlisten.then((f) => f());
+    };
+  }, []);
+
+  // Unsaved-changes guard for the OS window-close button / Window→Close (B1).
+  // preventDefault must run synchronously, so the dirty check is sync; the
+  // confirm dialog then decides whether to actually destroy the window.
+  useEffect(() => {
+    const win = getCurrentWindow();
+    const unlisten = win.onCloseRequested(async (event) => {
+      if (!anyTabDirty()) return; // clean — allow the default close
+      event.preventDefault();
+      if (await okToClose()) await win.destroy();
     });
     return () => {
       void unlisten.then((f) => f());
@@ -122,7 +168,7 @@ function App() {
       <Toolbar />
       <div className="flex min-h-0 flex-1">
         <main className="min-h-0 flex-1 overflow-y-auto">
-          <Editor />
+          {mode === "slide" ? <SlideEditor /> : <Editor />}
         </main>
         {networkOpen && (
           <Suspense

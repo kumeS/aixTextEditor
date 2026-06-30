@@ -6,9 +6,11 @@
 //! the frontend.
 
 use crate::ai::{self, AiRequest, LlmConfig};
+use crate::deck;
 use crate::error::{AppError, AppResult};
 use crate::fileio;
 use crate::models::{AnalysisResult, Document};
+use crate::pptx;
 use crate::settings::{self, Settings};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -78,6 +80,21 @@ pub fn import_document(path: String) -> AppResult<Document> {
 #[tauri::command]
 pub fn export_document(document: Document, path: String, format: String) -> AppResult<()> {
     fileio::export_to_path(&document, &path, &format)
+}
+
+/// Export the document as a PowerPoint deck: derive slides from the document
+/// (headings → slides, paragraphs → bullets, images embedded), download any
+/// remote image URLs, write `.pptx`, and report anything that couldn't be added.
+#[tauri::command]
+pub async fn export_pptx(document: Document, path: String) -> AppResult<pptx::PptxReport> {
+    let mut deck = deck::document_to_deck(&document);
+    pptx::resolve_remote_images(&mut deck).await;
+    let (bytes, warnings) = pptx::deck_to_pptx(&deck)?;
+    std::fs::write(&path, bytes)?;
+    Ok(pptx::PptxReport {
+        slides: deck.slides.len(),
+        warnings,
+    })
 }
 
 /// Save/open the native `.aix` document format (the chunk JSON from spec §5).

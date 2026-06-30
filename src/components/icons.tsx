@@ -164,6 +164,30 @@ export const FileIcon = (p: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+// A 16:9 slide frame — used to mark Slide-mode tabs / the "new slide deck" action.
+export const SlidesIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="3" y="5" width="18" height="11" rx="1.5" />
+    <path d="M8 20h8" />
+  </svg>
+);
+
+export const CopyIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="9" y="9" width="11" height="11" rx="2" />
+    <path d="M5 15V5a2 2 0 0 1 2-2h8" />
+  </svg>
+);
+
+// Full-screen present: a screen with a play triangle.
+export const PresentIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4" width="18" height="13" rx="1.5" />
+    <path d="M10.5 8.5l3.5 2-3.5 2z" fill="currentColor" stroke="none" />
+    <path d="M8 21h8" />
+  </svg>
+);
+
 export const FolderIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
