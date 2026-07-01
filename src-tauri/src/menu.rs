@@ -41,21 +41,25 @@ pub fn build<R: Runtime>(app: &App<R>) -> tauri::Result<Menu<R>> {
     let new_tab = MenuItemBuilder::with_id("new_tab", "New Tab").build(app)?;
     let open = MenuItemBuilder::with_id("open", "Open…").build(app)?;
     let save = MenuItemBuilder::with_id("save", "Save").build(app)?;
+    let save_as = MenuItemBuilder::with_id("save_as", "Save As…").build(app)?;
     let import = MenuItemBuilder::with_id("import", "Import…").build(app)?;
     let export_txt = MenuItemBuilder::with_id("export_txt", "Export as .txt").build(app)?;
     let export_md = MenuItemBuilder::with_id("export_md", "Export as .md").build(app)?;
     let export_rtf = MenuItemBuilder::with_id("export_rtf", "Export as .rtf").build(app)?;
+    let export_pptx = MenuItemBuilder::with_id("export_pptx", "Export as .pptx").build(app)?;
     let export_pdf = MenuItemBuilder::with_id("export_pdf", "Export as .pdf").build(app)?;
     let export = SubmenuBuilder::new(app, "Export")
         .item(&export_txt)
         .item(&export_md)
         .item(&export_rtf)
+        .item(&export_pptx)
         .item(&export_pdf)
         .build()?;
     let file_menu = SubmenuBuilder::new(app, "File")
         .item(&new_tab)
         .item(&open)
         .item(&save)
+        .item(&save_as)
         .separator()
         .item(&import)
         .item(&export)

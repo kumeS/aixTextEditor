@@ -14,7 +14,7 @@
 
 <br/>
 
-[![Version](https://img.shields.io/badge/🚀_v1.0.0-Release-0078D4?style=for-the-badge&logoColor=white)](https://github.com/kumeS/aixTextEditor/releases)
+[![Version](https://img.shields.io/badge/🚀_v1.2.0-Release-0078D4?style=for-the-badge&logoColor=white)](https://github.com/kumeS/aixTextEditor/releases)
 &nbsp;
 [![License](https://img.shields.io/badge/📜_Artistic--2.0-License-2EA44F?style=for-the-badge)](LICENSE)
 &nbsp;
@@ -176,26 +176,113 @@ Open with the gear icon or `⌘/Ctrl+,`:
 
 ## Architecture
 
+### 🔀 High-level data flow
+
+The React/TypeScript frontend owns the UI and state; **all** network and disk I/O
+happen in the Rust backend, reached over the Tauri IPC bridge. The document model
+(`Document = Chunk[]`) is defined once in Rust (`models.rs`) and mirrored 1:1 in
+TypeScript (`types.ts`), so the same shape crosses the boundary unchanged.
+
+```mermaid
+flowchart TB
+    User(["👤 User"])
+
+    subgraph FE["🖥️ Frontend — React / TypeScript (src/)"]
+        direction TB
+        UI["UI components<br/>Editor · SlideEditor · ChunkView<br/>Toolbar · TabBar · NetworkPanel"]
+        Store["Zustand store · store.ts<br/>tabs · Document = list of Chunks<br/>undo/redo · selection · autosave"]
+        Orchestr["Orchestration · api.ts<br/>aiActions · fileActions · slides"]
+        UI <--> Store
+        UI --> Orchestr
+        Orchestr --> Store
+    end
+
+    IPC{{"Tauri IPC<br/>invoke() · streaming Channel · events"}}
+
+    subgraph BE["🦀 Backend — Rust (src-tauri/src/)"]
+        direction TB
+        Cmd["commands.rs — command surface"]
+        Model["models.rs<br/>Document / Chunk · serde ⇄ types.ts"]
+        Ai["ai.rs — LlmProvider<br/>OpenRouter · SSE stream · images"]
+        Pptx["deck.rs + pptx.rs<br/>hand-written .pptx (OOXML)"]
+        Fio["fileio.rs — txt / md / rtf"]
+        Net["net.rs — SSRF-guarded fetch"]
+        Set["settings.rs — config + keychain"]
+        Cmd --> Ai & Pptx & Fio & Set
+        Cmd -.->|serde| Model
+        Ai --> Net
+        Pptx --> Net
+    end
+
+    subgraph EXT["☁️ External"]
+        direction TB
+        OR["OpenRouter API<br/>text + image models"]
+        FS["Filesystem<br/>.aix · exports · session.json"]
+        KC["OS keychain · API key"]
+        TTS["OS speech · macOS say"]
+    end
+
+    User --> UI
+    Orchestr <-->|"invoke() · Channel"| IPC
+    IPC <--> Cmd
+    Cmd -.->|"menu · speech-done · window events"| UI
+    Ai --> OR
+    Net --> OR
+    Fio --> FS
+    Cmd --> FS
+    Cmd --> TTS
+    Set --> KC
+
+    style FE fill:#eff6ff,stroke:#bfdbfe
+    style BE fill:#fff7ed,stroke:#fed7aa
+    style EXT fill:#f0fdf4,stroke:#bbf7d0
+    style IPC fill:#faf5ff,stroke:#e9d5ff
+```
+
+**Reading the flow**
+
+- **Everything is chunks.** The UI edits a `Document` (an ordered list of
+  `Chunk`s) held in the Zustand store; per-chunk selectors mean only the edited
+  paragraph re-renders.
+- **The frontend never talks to the network or disk directly.** Orchestration
+  (`aiActions`/`fileActions`) calls typed `invoke()` wrappers in `api.ts`; Rust
+  `commands.rs` does the work and returns the result — the API key and all HTTP
+  stay on the Rust side.
+- **Streaming** (AI drafting, per-chunk edits) flows back over a Tauri `Channel`;
+  backend→frontend events (native-menu clicks, `speech-done`, window lifecycle)
+  come over the event bus.
+- **Remote fetches are guarded.** Document image URLs and Draft reference URLs go
+  through `net.rs` (http(s)-only, SSRF host filtering, size cap + timeout).
+- **The same backend powers a headless CLI** (`cli.rs`) — `capabilities`, `info`,
+  and `export` reuse `deck.rs`/`pptx.rs`/`fileio.rs` without the GUI.
+
+### Project layout
+
 ```
 src/                     React frontend
   types.ts               TS mirror of the Rust model (camelCase)
   api.ts                 Typed invoke() wrappers (+ streaming Channel)
-  store.ts               Zustand store: tabs, chunks, undo/redo, selection, UI
+  store.ts               Zustand store: tabs, chunks, undo/redo, selection, autosave
   aiActions.ts           AI orchestration (context, busy state, tab-race guards)
-  fileActions.ts         New/Open/Import/Export/Draft (dialog plugin → Rust I/O)
+  fileActions.ts         New/Open/Import/Export/Draft/PPTX (dialog → Rust I/O)
+  slides.ts              Deck derivation (mirrors deck.rs) for the Slide view
   caret.ts               Visual-line caret detection (chunk Up/Down navigation)
   useShortcuts.ts        Global keyboard shortcuts
-  components/            TabBar, Toolbar, Editor, ChunkView, ChunkAiMenu,
-                         MermaidChunk, NetworkPanel, SettingsModal, PromptModal,
-                         SelectionBar, Toasts, icons
+  components/            TabBar, Toolbar, Editor, SlideEditor, ChunkView,
+                         ChunkAiMenu, MermaidChunk, NetworkPanel, SettingsModal,
+                         PromptModal, SelectionBar, Toasts, ErrorBoundary, icons
 src-tauri/src/           Rust backend
+  lib.rs                 Tauri builder: commands, native menu, window lifecycle
   models.rs              Document / Chunk / ChunkMetadata / Analysis* (serde)
   commands.rs            Tauri command surface
-  ai.rs                  LlmProvider trait + OpenRouter impl (incl. SSE
-                         streaming, image generation) + prompts
+  ai.rs                  LlmProvider trait + OpenRouter impl (SSE streaming,
+                         image generation) + prompts
+  deck.rs + pptx.rs      Document → Deck → hand-written .pptx (OOXML)
   fileio.rs              txt/md/rtf import-export, paragraph + heading chunking
+  net.rs                 SSRF-guarded, size-capped remote fetch
   settings.rs            Settings JSON + OS keychain (keyring)
   menu.rs                Native application menu (emits events to the frontend)
+  cli.rs                 Headless CLI (capabilities / info / export)
   error.rs               Unified AppError
 ```
 

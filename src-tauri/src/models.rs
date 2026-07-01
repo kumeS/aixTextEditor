@@ -9,6 +9,7 @@
 //! All structs serialize as camelCase to match the TypeScript types 1:1.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 pub const CHUNK_TYPE_TEXT: &str = "text";
@@ -49,11 +50,20 @@ pub struct ChunkMetadata {
     /// earlier version. The current value lives in `Chunk::content`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub content_history: Vec<String>,
-    /// For a HEADING chunk that begins a slide: an explicit slide-layout override
+    /// For a chunk that begins a slide: an explicit slide-layout override
     /// ("section" | "title-content" | "title-image"). When absent, the layout is
     /// auto-picked from the slide's content (see `deck.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout: Option<String>,
+    /// A text chunk marked as a subtitle (secondary title line, Req 3). In slide
+    /// mode it fills the slide's subtitle box and is excluded from the bullets.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub subtitle: bool,
+    /// Slide-only body override (Req 2): when set on a slide's lead chunk, the
+    /// slide renders THESE lines (a summary / custom content) instead of the
+    /// linked editor paragraphs — a reversible "detach" from the prose.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slide_body: Option<Vec<String>>,
 }
 
 fn default_chunk_type() -> String {
@@ -71,6 +81,8 @@ impl Default for ChunkMetadata {
             image_prompt: None,
             content_history: Vec::new(),
             layout: None,
+            subtitle: false,
+            slide_body: None,
         }
     }
 }
@@ -103,12 +115,7 @@ impl Chunk {
             metadata: ChunkMetadata {
                 chunk_type: CHUNK_TYPE_DIAGRAM.to_string(),
                 format: Some(format.into()),
-                level: None,
-                summary: None,
-                linked_chunks: Vec::new(),
-                image_prompt: None,
-                content_history: Vec::new(),
-                layout: None,
+                ..Default::default()
             },
         }
     }
@@ -121,13 +128,8 @@ impl Chunk {
             content: text.into(),
             metadata: ChunkMetadata {
                 chunk_type: CHUNK_TYPE_HEADING.to_string(),
-                format: None,
                 level: Some(level.clamp(1, 3)),
-                summary: None,
-                linked_chunks: Vec::new(),
-                image_prompt: None,
-                content_history: Vec::new(),
-                layout: None,
+                ..Default::default()
             },
         }
     }
@@ -142,6 +144,11 @@ impl Chunk {
 
     pub fn is_image(&self) -> bool {
         self.metadata.chunk_type == CHUNK_TYPE_IMAGE
+    }
+
+    /// A text chunk flagged as a subtitle (Req 3).
+    pub fn is_subtitle(&self) -> bool {
+        self.metadata.subtitle && self.metadata.chunk_type == CHUNK_TYPE_TEXT
     }
 }
 
@@ -180,6 +187,141 @@ impl Document {
             mode: default_doc_mode(),
             analysis: None,
         }
+    }
+
+    /// Validate and repair a freshly-loaded document so the editor's invariants
+    /// hold before it is handed to the UI/undo/save/graph code (A1). A `.aix`
+    /// file (or a CLI/agent-produced one) can violate them — empty chunk list,
+    /// duplicate/blank ids, out-of-range heading levels, unknown enums, and
+    /// `linkedChunks`/analysis references to chunks that no longer exist — and
+    /// every one of those silently breaks something downstream (duplicate ids
+    /// cause invisible cross-edits; dangling graph nodes jump to deleted text).
+    ///
+    /// Mutates `self` in place and returns human-readable notes for each class of
+    /// repair (empty when the document was already well-formed) so the caller can
+    /// tell the user what was changed.
+    pub fn normalize(&mut self) -> Vec<String> {
+        let mut notes = Vec::new();
+
+        // ---- 1. At least one chunk (the editor always needs a writing surface).
+        if self.chunks.is_empty() {
+            self.chunks.push(Chunk::new_text(0, ""));
+            notes.push("Document had no content; added an empty paragraph.".to_string());
+        }
+
+        // ---- 2. Known document mode.
+        if self.mode != DOC_MODE_EDITOR && self.mode != DOC_MODE_SLIDE {
+            notes.push(format!(
+                "Unknown document mode '{}'; reset to '{}'.",
+                self.mode, DOC_MODE_EDITOR
+            ));
+            self.mode = DOC_MODE_EDITOR.to_string();
+        }
+
+        // ---- 3. Unique, non-empty chunk ids. First occurrence keeps its id;
+        // blanks and later duplicates are renumbered. References (linkedChunks /
+        // analysis) addressed the original id, which still resolves to the kept
+        // chunk, so they need no rewrite.
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut renumbered = 0usize;
+        for c in &mut self.chunks {
+            if c.id.trim().is_empty() || !seen.insert(c.id.clone()) {
+                let fresh = new_id();
+                seen.insert(fresh.clone());
+                c.id = fresh;
+                renumbered += 1;
+            }
+        }
+        if renumbered > 0 {
+            notes.push(format!(
+                "{renumbered} chunk(s) had a missing or duplicate id; assigned new ids."
+            ));
+        }
+
+        let valid: HashSet<String> = self.chunks.iter().map(|c| c.id.clone()).collect();
+
+        // ---- 4. Per-chunk metadata sanity.
+        let known_types = [
+            CHUNK_TYPE_TEXT,
+            CHUNK_TYPE_HEADING,
+            CHUNK_TYPE_DIAGRAM,
+            CHUNK_TYPE_IMAGE,
+        ];
+        let known_layouts = [
+            SLIDE_LAYOUT_SECTION,
+            SLIDE_LAYOUT_TITLE_CONTENT,
+            SLIDE_LAYOUT_TITLE_IMAGE,
+        ];
+        let mut coerced_types = 0usize;
+        let mut clamped_levels = 0usize;
+        let mut dropped_layouts = 0usize;
+        let mut dropped_links = 0usize;
+        for c in &mut self.chunks {
+            if !known_types.contains(&c.metadata.chunk_type.as_str()) {
+                c.metadata.chunk_type = CHUNK_TYPE_TEXT.to_string();
+                coerced_types += 1;
+            }
+            if c.metadata.chunk_type == CHUNK_TYPE_HEADING {
+                let lv = c.metadata.level.unwrap_or(1).clamp(1, 3);
+                if c.metadata.level != Some(lv) {
+                    c.metadata.level = Some(lv);
+                    clamped_levels += 1;
+                }
+            }
+            if let Some(layout) = &c.metadata.layout {
+                if !known_layouts.contains(&layout.as_str()) {
+                    c.metadata.layout = None; // fall back to auto-pick
+                    dropped_layouts += 1;
+                }
+            }
+            let before = c.metadata.linked_chunks.len();
+            c.metadata
+                .linked_chunks
+                .retain(|t| t != &c.id && valid.contains(t));
+            dropped_links += before - c.metadata.linked_chunks.len();
+        }
+        if coerced_types > 0 {
+            notes.push(format!("{coerced_types} chunk(s) had an unknown type; reset to text."));
+        }
+        if clamped_levels > 0 {
+            notes.push(format!("{clamped_levels} heading(s) had an out-of-range level; clamped to 1–3."));
+        }
+        if dropped_layouts > 0 {
+            notes.push(format!("{dropped_layouts} slide(s) had an unknown layout; reset to auto."));
+        }
+        if dropped_links > 0 {
+            notes.push(format!("Removed {dropped_links} link(s) to missing paragraphs."));
+        }
+
+        // ---- 5. Prune a persisted analysis graph of references to gone chunks.
+        if let Some(a) = self.analysis.as_mut() {
+            // Degenerate self-edges aren't "damage" (the graph view ignores them);
+            // drop them silently so they don't trigger a spurious "repaired" note
+            // (and a dirty reopen) for an otherwise-valid document.
+            a.edges.retain(|e| e.source != e.target);
+            let before_nodes = a.nodes.len();
+            let before_edges = a.edges.len();
+            a.nodes.retain(|n| match n.kind.as_str() {
+                "sentence" => n.parent.as_ref().map(|p| valid.contains(p)).unwrap_or(false),
+                _ => valid.contains(&n.id),
+            });
+            let node_ids: HashSet<String> = a.nodes.iter().map(|n| n.id.clone()).collect();
+            a.edges
+                .retain(|e| node_ids.contains(&e.source) && node_ids.contains(&e.target));
+            let pruned = (before_nodes - a.nodes.len()) + (before_edges - a.edges.len());
+            if pruned > 0 {
+                notes.push(format!(
+                    "Removed {pruned} relationship-graph node(s)/edge(s) referencing missing paragraphs."
+                ));
+            }
+        }
+
+        // ---- 6. Re-sequence chunk order to match position.
+        for (i, c) in self.chunks.iter_mut().enumerate() {
+            c.order = i as u32;
+        }
+
+        notes
     }
 }
 
@@ -287,4 +429,89 @@ pub struct AnalysisResult {
     pub nodes: Vec<AnalysisNode>,
     #[serde(default)]
     pub edges: Vec<AnalysisEdge>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_document_gets_a_paragraph() {
+        let mut doc = Document::new("D");
+        let notes = doc.normalize();
+        assert_eq!(doc.chunks.len(), 1);
+        assert_eq!(doc.chunks[0].metadata.chunk_type, CHUNK_TYPE_TEXT);
+        assert!(!notes.is_empty());
+    }
+
+    #[test]
+    fn duplicate_and_blank_ids_are_renumbered() {
+        let mut doc = Document::new("D");
+        let mut a = Chunk::new_text(0, "a");
+        a.id = "dup".into();
+        let mut b = Chunk::new_text(1, "b");
+        b.id = "dup".into(); // duplicate
+        let mut c = Chunk::new_text(2, "c");
+        c.id = "".into(); // blank
+        doc.chunks = vec![a, b, c];
+        let notes = doc.normalize();
+        let ids: HashSet<&String> = doc.chunks.iter().map(|c| &c.id).collect();
+        assert_eq!(ids.len(), 3, "all ids unique");
+        assert!(doc.chunks.iter().all(|c| !c.id.trim().is_empty()));
+        assert_eq!(doc.chunks[0].id, "dup", "first occurrence keeps its id");
+        assert!(notes.iter().any(|n| n.contains("id")));
+    }
+
+    #[test]
+    fn dangling_links_and_graph_are_pruned() {
+        let mut doc = Document::new("D");
+        let mut a = Chunk::new_text(0, "a");
+        a.id = "c1".into();
+        a.metadata.linked_chunks = vec!["c2".into(), "ghost".into(), "c1".into()];
+        let mut b = Chunk::new_text(1, "b");
+        b.id = "c2".into();
+        doc.chunks = vec![a, b];
+        doc.analysis = Some(AnalysisResult {
+            nodes: vec![
+                AnalysisNode { id: "c1".into(), label: "".into(), summary: "".into(), kind: "paragraph".into(), parent: None },
+                AnalysisNode { id: "ghost".into(), label: "".into(), summary: "".into(), kind: "paragraph".into(), parent: None },
+            ],
+            edges: vec![
+                AnalysisEdge { source: "c1".into(), target: "ghost".into(), relation: "".into() },
+                AnalysisEdge { source: "c1".into(), target: "c1".into(), relation: "".into() },
+            ],
+        });
+        doc.normalize();
+        // self-link + ghost link dropped; only the valid "c2" link remains.
+        assert_eq!(doc.chunks[0].metadata.linked_chunks, vec!["c2".to_string()]);
+        let a = doc.analysis.unwrap();
+        assert_eq!(a.nodes.iter().map(|n| n.id.clone()).collect::<Vec<_>>(), vec!["c1"]);
+        assert!(a.edges.is_empty(), "edges touching ghost are pruned");
+    }
+
+    #[test]
+    fn unknown_enums_are_coerced() {
+        let mut doc = Document::new("D");
+        doc.mode = "weird".into();
+        let mut h = Chunk::new_heading(0, 1, "H");
+        h.metadata.level = Some(9); // out of range
+        h.metadata.layout = Some("bogus".into());
+        let mut t = Chunk::new_text(1, "t");
+        t.metadata.chunk_type = "mystery".into();
+        doc.chunks = vec![h, t];
+        doc.normalize();
+        assert_eq!(doc.mode, DOC_MODE_EDITOR);
+        assert_eq!(doc.chunks[0].metadata.level, Some(3));
+        assert_eq!(doc.chunks[0].metadata.layout, None);
+        assert_eq!(doc.chunks[1].metadata.chunk_type, CHUNK_TYPE_TEXT);
+    }
+
+    #[test]
+    fn well_formed_document_is_unchanged() {
+        let mut doc = Document::new("D");
+        doc.chunks.push(Chunk::new_heading(0, 1, "H"));
+        doc.chunks.push(Chunk::new_text(1, "body"));
+        let notes = doc.normalize();
+        assert!(notes.is_empty(), "no repairs expected: {notes:?}");
+    }
 }

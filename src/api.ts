@@ -9,7 +9,9 @@ import type {
   Document,
   DraftEvent,
   ExportFormat,
+  OpenedDocument,
   PptxReport,
+  SessionData,
   Settings,
 } from "./types";
 
@@ -28,7 +30,7 @@ export const api = {
     invoke<void>("save_document_json", { document, path }),
 
   openDocumentJson: (path: string) =>
-    invoke<Document>("open_document_json", { path }),
+    invoke<OpenedDocument>("open_document_json", { path }),
 
   getSettings: () => invoke<Settings>("get_settings"),
 
@@ -85,8 +87,17 @@ export const api = {
 
   fetchUrlText: (url: string) => invoke<string>("fetch_url_text", { url }),
 
+  /** Start read-aloud; resolves with an utterance id matched by the `speech-done` event (UI3). */
   speakText: (text: string, voice?: string) =>
-    invoke<void>("speak_text", { text, voice: voice ?? null }),
+    invoke<number>("speak_text", { text, voice: voice ?? null }),
 
   stopSpeaking: () => invoke<void>("stop_speaking"),
+
+  // Session autosave / crash recovery (A2).
+  saveSession: (session: SessionData) => invoke<void>("save_session", { session }),
+  loadSession: () => invoke<SessionData | null>("load_session"),
+  clearSession: () => invoke<void>("clear_session"),
+
+  /** Quit the whole app (Cmd+Q). Window close only hides the window (macOS). */
+  quitApp: () => invoke<void>("quit_app"),
 };

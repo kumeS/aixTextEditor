@@ -48,9 +48,23 @@ interface Props {
   chunkId: string;
   index: number;
   total: number;
+  /**
+   * When set, this chunk is rendered inside the Slide editor (B2/UI4/D4). It
+   * constrains structural editing to the current slide: moves stay within the
+   * slide (and never displace the title), arrow-nav/merge can't leave it, and
+   * the heading-creating shortcuts that would silently re-cut slides are
+   * disabled. New slides / titles are made via explicit slide controls instead.
+   */
+  slideScope?: {
+    ids: string[];
+    canMoveUp: boolean;
+    canMoveDown: boolean;
+    moveUp: () => void;
+    moveDown: () => void;
+  };
 }
 
-export default function ChunkView({ chunkId, index, total }: Props) {
+export default function ChunkView({ chunkId, index, total, slideScope }: Props) {
   const chunk = useStore((s) => s.doc.chunks.find((c) => c.id === chunkId));
   const busy = useStore((s) => !!s.busyChunks[chunkId]);
   const isFocused = useStore((s) => s.focusedChunkId === chunkId);
@@ -67,6 +81,7 @@ export default function ChunkView({ chunkId, index, total }: Props) {
   const addChunkAfter = useStore((s) => s.addChunkAfter);
   const setChunkType = useStore((s) => s.setChunkType);
   const setHeadingLevel = useStore((s) => s.setHeadingLevel);
+  const setChunkSubtitle = useStore((s) => s.setChunkSubtitle);
   const convertToHeading = useStore((s) => s.convertToHeading);
   const isSelected = useStore((s) => s.selectedChunkIds.includes(chunkId));
   const toggleSelectChunk = useStore((s) => s.toggleSelectChunk);
@@ -77,7 +92,9 @@ export default function ChunkView({ chunkId, index, total }: Props) {
   const textRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [showHistory, setShowHistory] = useState(false);
-  const [speaking, setSpeaking] = useState(false);
+  // UI3: read-aloud state lives in the store (a single global "speaking" chunk),
+  // so completion/Stop clears exactly this button and never another chunk's.
+  const speaking = useStore((s) => s.speakingChunkId === chunkId);
   // Auto-open the "what changed" panel right after an AI edit.
   const [showDiff, setShowDiff] = useState(false);
   useEffect(() => {
@@ -118,6 +135,11 @@ export default function ChunkView({ chunkId, index, total }: Props) {
   const isText = type === "text";
   const isHeading = type === "heading";
   const isImage = type === "image";
+  const isSubtitle = isText && !!chunk.metadata.subtitle; // Req 3
+  // A subtitle renders larger and lighter than a body paragraph.
+  const textCls = isSubtitle
+    ? "w-full resize-none overflow-hidden bg-transparent font-sans text-2xl font-medium leading-snug text-ink-soft outline-none placeholder:text-ink-faint/40"
+    : "w-full resize-none overflow-hidden bg-transparent font-serif text-[1.075rem] leading-8 text-ink-soft outline-none placeholder:text-ink-faint/50";
   const headingLevel = Math.min(Math.max(chunk.metadata.level ?? 1, 1), 3);
 
   // Per-chunk version history (prior text revisions / image URLs).
@@ -131,10 +153,12 @@ export default function ChunkView({ chunkId, index, total }: Props) {
     (isText || isHeading) && !!prevVersion && changed(prevVersion, chunk.content);
 
   // Typing "# ", "## " or "### " at the start of a text chunk turns it into a
-  // heading of that level (Markdown-style).
+  // heading of that level (Markdown-style). Disabled inside the slide editor
+  // (D4): a heading there starts a NEW slide, so auto-converting a bullet you're
+  // typing would silently split the current slide.
   const handleTextChange = (value: string) => {
     const m = /^(#{1,3})[ \t](.*)$/.exec(value);
-    if (m) convertToHeading(chunkId, m[1].length, m[2]);
+    if (m && !slideScope) convertToHeading(chunkId, m[1].length, m[2]);
     else updateChunkContent(chunkId, value);
   };
 
@@ -178,7 +202,9 @@ export default function ChunkView({ chunkId, index, total }: Props) {
         ti += up ? -1 : 1;
       }
       const target = chunks[ti];
-      if (target) {
+      // UI4: in the slide editor, never move focus to a chunk outside the current
+      // slide (that would scroll the cursor off the visible canvas).
+      if (target && (!slideScope || slideScope.ids.includes(target.id))) {
         const edge = caretVerticalEdge(el);
         if ((up && edge.atFirstLine) || (!up && edge.atLastLine)) {
           e.preventDefault();
@@ -195,16 +221,24 @@ export default function ChunkView({ chunkId, index, total }: Props) {
       el.selectionEnd === 0
     ) {
       // An empty heading + Backspace at start demotes it back to a text chunk.
-      if (isHeading && chunk.content === "") {
+      // Disabled in the slide editor (D4): the heading is the slide's title, so
+      // demoting it would silently merge this slide into the previous one.
+      if (isHeading && chunk.content === "" && !slideScope) {
         e.preventDefault();
         setChunkType(chunkId, "text");
         return;
       }
-      // Merge a text paragraph into the previous text paragraph.
+      // Merge a text paragraph into the previous text paragraph — but in the
+      // slide editor only when the previous paragraph is in the SAME slide (D4),
+      // so a backspace can't pull text across a slide boundary.
       if (index > 0 && isText) {
         const chunks = useStore.getState().doc.chunks;
         const prev = chunks[index - 1];
-        if (prev && prev.metadata.chunkType === "text") {
+        if (
+          prev &&
+          prev.metadata.chunkType === "text" &&
+          (!slideScope || slideScope.ids.includes(prev.id))
+        ) {
           e.preventDefault();
           setPendingCaret(prev.id, prev.content.length);
           mergeWithPrevious(chunkId);
@@ -337,7 +371,7 @@ export default function ChunkView({ chunkId, index, total }: Props) {
         })()
       ) : isText ? (
         isStreaming ? (
-          <div className="w-full whitespace-pre-wrap break-words font-serif text-[1.075rem] leading-8 text-ink-soft">
+          <div className={`${textCls} whitespace-pre-wrap break-words`}>
             {streamingText}
             <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-accent align-middle" />
           </div>
@@ -346,12 +380,18 @@ export default function ChunkView({ chunkId, index, total }: Props) {
             ref={textRef}
             value={chunk.content}
             spellCheck
-            placeholder={index === 0 ? "Start writing your first paragraph…" : "…"}
+            placeholder={
+              isSubtitle
+                ? "Subtitle"
+                : index === 0
+                  ? "Start writing your first paragraph…"
+                  : "…"
+            }
             onFocus={() => setFocused(chunkId)}
             onChange={(e) => handleTextChange(e.target.value)}
             onKeyDown={onKeyDown}
             rows={1}
-            className="w-full resize-none overflow-hidden bg-transparent font-serif text-[1.075rem] leading-8 text-ink-soft outline-none placeholder:text-ink-faint/50"
+            className={textCls}
           />
         )
       ) : (
@@ -474,13 +514,8 @@ export default function ChunkView({ chunkId, index, total }: Props) {
             <button
               className={`${gutterBtn} hover:text-accent ${speaking ? "text-accent" : ""}`}
               onClick={() => {
-                if (speaking) {
-                  void stopSpeaking();
-                  setSpeaking(false);
-                } else {
-                  void speakChunk(chunkId);
-                  setSpeaking(true);
-                }
+                if (speaking) void stopSpeaking();
+                else void speakChunk(chunkId);
               }}
             >
               {speaking ? <StopIcon /> : <SpeakerIcon />}
@@ -530,8 +565,10 @@ export default function ChunkView({ chunkId, index, total }: Props) {
         <Tooltip label="Move up">
           <button
             className={gutterBtn}
-            disabled={index === 0}
-            onClick={() => moveChunk(chunkId, -1)}
+            // B2: in a slide, the move range is the slide itself (not the whole
+            // document), so a reorder can't reach into the neighbouring slide.
+            disabled={slideScope ? !slideScope.canMoveUp : index === 0}
+            onClick={() => (slideScope ? slideScope.moveUp() : moveChunk(chunkId, -1))}
           >
             <ArrowUpIcon />
           </button>
@@ -539,13 +576,24 @@ export default function ChunkView({ chunkId, index, total }: Props) {
         <Tooltip label="Move down">
           <button
             className={gutterBtn}
-            disabled={index === total - 1}
-            onClick={() => moveChunk(chunkId, 1)}
+            disabled={slideScope ? !slideScope.canMoveDown : index === total - 1}
+            onClick={() => (slideScope ? slideScope.moveDown() : moveChunk(chunkId, 1))}
           >
             <ArrowDownIcon />
           </button>
         </Tooltip>
-        {!isImage && (
+        {isText && (
+          <Tooltip label={chunk.metadata.subtitle ? "Unmark as subtitle" : "Mark as subtitle"}>
+            <button
+              className={`${gutterBtn} ${chunk.metadata.subtitle ? "text-accent" : ""}`}
+              aria-pressed={!!chunk.metadata.subtitle}
+              onClick={() => setChunkSubtitle(chunkId, !chunk.metadata.subtitle)}
+            >
+              <span className="text-[11px] font-bold leading-none">S</span>
+            </button>
+          </Tooltip>
+        )}
+        {!isImage && !slideScope && (
           <Tooltip label={isText ? "Convert to diagram" : "Convert to text"}>
             <button
               className={gutterBtn}

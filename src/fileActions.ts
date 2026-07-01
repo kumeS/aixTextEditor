@@ -13,6 +13,18 @@ function message(e: unknown): string {
   return typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
 }
 
+/**
+ * After a save, if no tab has unsaved changes any more, drop the crash-recovery
+ * session so it isn't offered on next launch (A2). Called from the save paths so
+ * saving your work clears the "restore?" prompt; the startup-restore race is
+ * avoided because we never clear during startup.
+ */
+function clearSessionIfAllSaved(): void {
+  const st = useStore.getState();
+  const dirtyLeft = st.dirty || Object.values(st.inactiveTabs).some((t) => t.dirty);
+  if (!dirtyLeft) void api.clearSession().catch(() => {});
+}
+
 function safeName(title: string): string {
   const base = title.trim() || "Untitled";
   return base.replace(/[\\/:*?"<>|]/g, "_");
@@ -62,7 +74,10 @@ export async function draftDocument(
   // Stream only while the draft's own tab stays active (the user may switch).
   const draftTab = useStore.getState().activeTabId;
   const onDraftTab = () => useStore.getState().activeTabId === draftTab;
-  useStore.getState().setGlobalBusy("Drafting…");
+  // B3: scope the busy spinner to the draft's own tab, so switching away during
+  // generation doesn't strand a "Drafting…" spinner (which would also trip the
+  // Analyze/Draft busy guards) on that tab or clear the foreground tab's spinner.
+  useStore.getState().setGlobalBusy("Drafting…", draftTab);
   try {
     await api.aiDraftStream(theme.trim(), targetWords, reference, (e) => {
       if (!onDraftTab()) return; // user switched tabs — don't write elsewhere
@@ -81,7 +96,7 @@ export async function draftDocument(
   } catch (e) {
     useStore.getState().notify(message(e), "error");
   } finally {
-    useStore.getState().setGlobalBusy(null);
+    useStore.getState().setGlobalBusy(null, draftTab);
   }
 }
 
@@ -276,9 +291,15 @@ export async function openNative(): Promise<void> {
       filters: [{ name: "AIX Document", extensions: [NATIVE_EXT] }],
     });
     if (typeof selected !== "string") return;
-    const doc = await api.openDocumentJson(selected);
-    openInTab(doc, selected);
-    useStore.getState().notify("Document opened.", "success");
+    const { document, notes } = await api.openDocumentJson(selected);
+    // If the file had to be repaired on load (A1), open it dirty so the cleaned
+    // version can be saved back, and tell the user exactly what changed.
+    openInTab(document, selected, notes.length > 0);
+    if (notes.length > 0) {
+      useStore.getState().notify(`Opened and repaired this file: ${notes.join(" ")}`, "info");
+    } else {
+      useStore.getState().notify("Document opened.", "success");
+    }
   } catch (e) {
     useStore.getState().notify(message(e), "error");
   }
@@ -294,6 +315,7 @@ export async function saveNativeAs(): Promise<void> {
     if (!path) return;
     await api.saveDocumentJson(s.doc, path);
     s.markClean(path);
+    clearSessionIfAllSaved();
     s.notify("Document saved.", "success");
   } catch (e) {
     s.notify(message(e), "error");
@@ -309,6 +331,7 @@ export async function saveNative(): Promise<void> {
   try {
     await api.saveDocumentJson(s.doc, s.filePath);
     s.markClean();
+    clearSessionIfAllSaved();
     s.notify("Document saved.", "success");
   } catch (e) {
     s.notify(message(e), "error");

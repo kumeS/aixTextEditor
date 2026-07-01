@@ -1,12 +1,11 @@
 // Tab strip for managing multiple open documents at once. The active tab's
 // state lives in the store's top-level fields; inactive tabs are snapshots.
 //
-// Each tab is created in a FIXED mode — Editor (prose) or Slide (deck) — chosen
-// from the "+" menu and never converted afterwards. A small icon on each tab
-// shows its mode.
+// "+" adds a new tab immediately; a tab's Editor/Slides mode is switched from the
+// toolbar's view toggle (both are the same chunks, presented differently). A
+// small icon on each tab shows its current mode.
 
 import { confirm } from "@tauri-apps/plugin-dialog";
-import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import type { DocMode } from "../types";
 import { CloseIcon, FileIcon, PlusIcon, SlidesIcon } from "./icons";
@@ -30,19 +29,6 @@ export default function TabBar() {
   const closeTab = useStore((s) => s.closeTab);
   const newTab = useStore((s) => s.newTab);
 
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [menuOpen]);
-
   const titleOf = (id: string) =>
     (id === activeTabId ? activeTitle : inactiveTabs[id]?.doc.title) || "Untitled";
   const dirtyOf = (id: string) =>
@@ -59,11 +45,6 @@ export default function TabBar() {
       if (!ok) return;
     }
     closeTab(id);
-  };
-
-  const create = (mode: DocMode) => {
-    setMenuOpen(false);
-    newTab(mode);
   };
 
   return (
@@ -102,33 +83,15 @@ export default function TabBar() {
         );
       })}
 
-      {/* New-tab mode selector: Editor doc vs Slide deck (mode is fixed at creation). */}
-      <div ref={menuRef} className="relative shrink-0">
-        <button
-          onClick={() => setMenuOpen((v) => !v)}
-          className="rounded-md p-1 text-ink-faint hover:bg-white hover:text-ink"
-          title="New tab — choose Editor or Slides"
-          aria-label="New tab"
-        >
-          <PlusIcon className="h-4 w-4" />
-        </button>
-        {menuOpen && (
-          <div className="absolute left-0 top-8 z-30 w-48 rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
-            <button
-              onClick={() => create("editor")}
-              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-sm text-ink-soft hover:bg-gray-100"
-            >
-              <FileIcon className="h-4 w-4 text-ink-faint" /> New Editor document
-            </button>
-            <button
-              onClick={() => create("slide")}
-              className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-sm text-ink-soft hover:bg-gray-100"
-            >
-              <SlidesIcon className="h-4 w-4 text-accent/80" /> New Slide deck
-            </button>
-          </div>
-        )}
-      </div>
+      {/* New tab — added immediately; switch its Editor/Slides view from the toolbar. */}
+      <button
+        onClick={() => newTab("editor")}
+        className="shrink-0 rounded-md p-1 text-ink-faint hover:bg-white hover:text-ink"
+        title="New tab"
+        aria-label="New tab"
+      >
+        <PlusIcon className="h-4 w-4" />
+      </button>
     </div>
   );
 }

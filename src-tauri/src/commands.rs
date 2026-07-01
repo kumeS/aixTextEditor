@@ -14,13 +14,30 @@ use crate::pptx;
 use crate::settings::{self, Settings};
 use serde::Serialize;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 fn config_dir(app: &AppHandle) -> AppResult<PathBuf> {
     app.path()
         .app_config_dir()
         .map_err(|e| AppError::Config(format!("Could not resolve config directory: {e}")))
+}
+
+/// Reject a write target whose extension is present but isn't one we expect
+/// (A6 defence-in-depth: a compromised renderer can't coax a command into
+/// writing an executable `.command`/`.sh` somewhere). A missing extension is
+/// allowed — the OS save dialog appends one — so normal flows are unaffected.
+fn check_ext(path: &str, allowed: &[&str]) -> AppResult<()> {
+    if let Some(ext) = std::path::Path::new(path).extension().and_then(|e| e.to_str()) {
+        if !allowed.iter().any(|a| a.eq_ignore_ascii_case(ext)) {
+            return Err(AppError::Other(format!(
+                "Refusing to write '{path}': expected a .{} file.",
+                allowed.join("/.")
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// True for endpoints served from the local machine (e.g. an Ollama bridge),
@@ -74,11 +91,14 @@ fn load_image_llm_config(app: &AppHandle) -> AppResult<LlmConfig> {
 
 #[tauri::command]
 pub fn import_document(path: String) -> AppResult<Document> {
-    fileio::import_from_path(&path)
+    let mut doc = fileio::import_from_path(&path)?;
+    doc.normalize(); // enforce invariants on imported text too (A1)
+    Ok(doc)
 }
 
 #[tauri::command]
 pub fn export_document(document: Document, path: String, format: String) -> AppResult<()> {
+    check_ext(&path, &[format.as_str()])?;
     fileio::export_to_path(&document, &path, &format)
 }
 
@@ -87,6 +107,7 @@ pub fn export_document(document: Document, path: String, format: String) -> AppR
 /// remote image URLs, write `.pptx`, and report anything that couldn't be added.
 #[tauri::command]
 pub async fn export_pptx(document: Document, path: String) -> AppResult<pptx::PptxReport> {
+    check_ext(&path, &["pptx"])?;
     let mut deck = deck::document_to_deck(&document);
     pptx::resolve_remote_images(&mut deck).await;
     let (bytes, warnings) = pptx::deck_to_pptx(&deck)?;
@@ -100,14 +121,29 @@ pub async fn export_pptx(document: Document, path: String) -> AppResult<pptx::Pp
 /// Save/open the native `.aix` document format (the chunk JSON from spec §5).
 #[tauri::command]
 pub fn save_document_json(document: Document, path: String) -> AppResult<()> {
+    check_ext(&path, &["aix"])?;
     std::fs::write(path, serde_json::to_string_pretty(&document)?)?;
     Ok(())
 }
 
+/// A `.aix` document loaded from disk, plus any repairs `Document::normalize`
+/// had to make (A1) so the frontend can tell the user what was fixed.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenedDocument {
+    pub document: Document,
+    pub notes: Vec<String>,
+}
+
 #[tauri::command]
-pub fn open_document_json(path: String) -> AppResult<Document> {
+pub fn open_document_json(path: String) -> AppResult<OpenedDocument> {
     let s = std::fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&s)?)
+    let mut document: Document = serde_json::from_str(&s)?;
+    // Enforce the editor's invariants at the load boundary — a malformed or
+    // partially-written .aix (easy to produce via the CLI/agent surface) must not
+    // reach the UI with duplicate ids / dangling graph refs (A1).
+    let notes = document.normalize();
+    Ok(OpenedDocument { document, notes })
 }
 
 // ----- settings & secret storage ------------------------------------------
@@ -251,24 +287,19 @@ pub fn read_reference_file(path: String) -> AppResult<String> {
     fileio::read_reference_text(&path)
 }
 
+/// Max bytes fetched for a Draft reference URL (A4): bounds memory use on a huge
+/// or hostile page.
+const MAX_HTML_BYTES: usize = 8 * 1024 * 1024;
+
 /// Fetch a URL and return its readable text (tags/scripts stripped), for use as
 /// Draft reference material.
 #[tauri::command]
 pub async fn fetch_url_text(url: String) -> AppResult<String> {
-    let client = reqwest::Client::new();
-    let res = client
-        .get(&url)
-        .header("User-Agent", "aixTextEditor/1.1 (+https://github.com/kumeS/AIX_Text_Editor)")
-        .send()
-        .await?;
-    let status = res.status();
-    if !status.is_success() {
-        return Err(AppError::Network(format!(
-            "Could not fetch URL (HTTP {}).",
-            status.as_u16()
-        )));
-    }
-    let body = res.text().await?;
+    // `net::safe_fetch` enforces http(s)-only, SSRF host filtering, per-hop
+    // redirect re-validation, a size cap and a timeout (A4/A5) — previously this
+    // could hang indefinitely and buffer an unbounded response into memory.
+    let bytes = crate::net::safe_fetch(&url, MAX_HTML_BYTES, 20).await?;
+    let body = String::from_utf8_lossy(&bytes);
     let text = strip_html(&body);
     Ok(text.chars().take(20_000).collect())
 }
@@ -318,20 +349,33 @@ fn strip_html(html: &str) -> String {
 
 // ----- Text-to-speech (read aloud) -----------------------------------------
 
-/// Speak `text` aloud using the OS speech synthesizer (macOS `say`). Runs
-/// detached so it never blocks the UI; an optional `voice` selects a specific
-/// system voice (e.g. "Kyoko" for Japanese). Any current speech is stopped first.
+/// Monotonic id for each read-aloud request, so the frontend can match the
+/// "speech finished" event to the exact button that started it (UI3).
+static SPEECH_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Speak `text` aloud using the OS speech synthesizer (macOS `say`). Returns an
+/// utterance id immediately (never blocks the UI); a background thread waits for
+/// speech to finish and then emits a `speech-done` event carrying that id, so the
+/// frontend clears exactly the chunk that was playing — instead of leaving the
+/// button stuck on "Stop" and cross-wiring multiple chunks (UI3). Any current
+/// speech is stopped first; its own `speech-done` (a smaller id) is then
+/// distinguishable from this one. An optional `voice` selects a system voice.
 #[tauri::command]
-pub fn speak_text(text: String, voice: Option<String>) -> AppResult<()> {
+pub fn speak_text(app: AppHandle, text: String, voice: Option<String>) -> AppResult<u64> {
+    let id = SPEECH_COUNTER.fetch_add(1, Ordering::SeqCst) + 1;
     let trimmed = text.trim();
     if trimmed.is_empty() {
-        return Ok(());
+        // Nothing to say — report completion immediately so the UI doesn't stick.
+        let _ = app.emit("speech-done", id);
+        return Ok(id);
     }
     #[cfg(target_os = "macos")]
     {
         use std::io::Write;
         use std::process::{Command, Stdio};
-        // Stop any in-flight speech so a new request restarts cleanly.
+        // Stop any in-flight speech so a new request restarts cleanly. The killed
+        // utterance's wait-thread will emit its own (older-id) speech-done, which
+        // the frontend ignores because it no longer matches the active id.
         let _ = Command::new("killall").arg("say").status();
         let mut cmd = Command::new("say");
         // Only pass the requested voice if it's actually installed; otherwise the
@@ -351,12 +395,19 @@ pub fn speak_text(text: String, voice: Option<String>) -> AppResult<()> {
             .map_err(|e| AppError::Other(format!("Could not start speech: {e}")))?;
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(trimmed.as_bytes());
+            // stdin is dropped here → EOF, so `say` knows the input is complete.
         }
-        Ok(())
+        // Wait for completion off-thread, then notify the frontend.
+        let app = app.clone();
+        std::thread::spawn(move || {
+            let _ = child.wait();
+            let _ = app.emit("speech-done", id);
+        });
+        Ok(id)
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = voice;
+        let _ = (voice, app);
         Err(AppError::Other(
             "Read-aloud is currently available on macOS only.".to_string(),
         ))
@@ -389,4 +440,69 @@ pub fn stop_speaking() -> AppResult<()> {
         let _ = std::process::Command::new("killall").arg("say").status();
     }
     Ok(())
+}
+
+// ----- session autosave / crash recovery (A2) ------------------------------
+
+fn session_path(app: &AppHandle) -> AppResult<PathBuf> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Config(format!("Could not resolve app data directory: {e}")))?
+        .join("session.json"))
+}
+
+/// Persist the whole multi-tab working set (active + background tabs) so a crash
+/// or force-quit doesn't lose unsaved work, including irreproducible AI drafts
+/// (A2). The frontend debounces this on dirty changes. Written atomically
+/// (temp + rename) so a crash mid-write can't corrupt the recovery file. The
+/// payload is an opaque JSON value — its shape is owned by the frontend.
+#[tauri::command]
+pub fn save_session(app: AppHandle, session: serde_json::Value) -> AppResult<()> {
+    let path = session_path(&app)?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_string(&session)?)?;
+    std::fs::rename(&tmp, &path)?;
+    Ok(())
+}
+
+/// Load the saved session, or `None` if there isn't one (first run / clean exit).
+/// A corrupt/unparseable file is treated as "no session" and deleted, so a bad
+/// write can't make recovery error out on every launch.
+#[tauri::command]
+pub fn load_session(app: AppHandle) -> AppResult<Option<serde_json::Value>> {
+    let path = session_path(&app)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let text = std::fs::read_to_string(&path)?;
+    match serde_json::from_str(&text) {
+        Ok(value) => Ok(Some(value)),
+        Err(_) => {
+            let _ = std::fs::remove_file(&path); // self-heal a corrupt recovery file
+            Ok(None)
+        }
+    }
+}
+
+/// Delete the session file (after a clean quit or once the user declines to
+/// restore), so it isn't offered again.
+#[tauri::command]
+pub fn clear_session(app: AppHandle) -> AppResult<()> {
+    let path = session_path(&app)?;
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+/// Quit the whole app (Cmd+Q / menu Quit). Uses `AppHandle::exit`, which passes a
+/// non-None exit code so the macOS "keep running on window close" backstop in
+/// `lib.rs` lets it through (a plain window close is vetoed instead).
+#[tauri::command]
+pub fn quit_app(app: AppHandle) {
+    app.exit(0);
 }

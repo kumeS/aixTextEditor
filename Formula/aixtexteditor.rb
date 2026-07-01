@@ -19,7 +19,9 @@
 class Aixtexteditor < Formula
   desc "LLM-augmented chunk-based editor for academic papers and reports"
   homepage "https://github.com/kumeS/aixTextEditor"
-  url "https://github.com/kumeS/aixTextEditor/archive/refs/tags/v1.1.0.tar.gz"
+  url "https://github.com/kumeS/aixTextEditor/archive/refs/tags/v1.2.0.tar.gz"
+  # TODO(release): regenerate for the v1.2.0 source tarball once the tag exists —
+  #   curl -sL https://github.com/kumeS/aixTextEditor/archive/refs/tags/v1.2.0.tar.gz | shasum -a 256
   sha256 "2f2d6bbf8948a60bf6c00ed3f59976ce17cf9aa3c60172feed14ceac804b3646"
   license "Artistic-2.0"
   head "https://github.com/kumeS/aixTextEditor.git", branch: "main"

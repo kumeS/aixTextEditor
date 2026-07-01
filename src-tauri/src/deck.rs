@@ -57,11 +57,13 @@ pub fn document_to_deck(doc: &Document) -> Deck {
     // chunk (set from the slide editor's layout picker), else auto-pick from
     // content.
     for s in &mut slides {
+        // The layout override may sit on the heading OR, for a heading-less
+        // (leading) slide, on its first content chunk — take the first found so
+        // any slide can carry a layout (mirrors the TS `resolveLayout`).
         let override_layout = s
             .chunks
             .iter()
-            .find(|c| c.is_heading())
-            .and_then(|c| c.metadata.layout.clone())
+            .find_map(|c| c.metadata.layout.clone())
             .filter(|l| !l.trim().is_empty());
         s.layout = override_layout.unwrap_or_else(|| {
             let has_image = s.chunks.iter().any(|c| c.is_image());
@@ -119,6 +121,19 @@ mod tests {
         let deck = document_to_deck(&doc);
         assert_eq!(deck.slides.len(), 1);
         assert_eq!(deck.slides[0].layout, SLIDE_LAYOUT_SECTION);
+    }
+
+    #[test]
+    fn layout_override_on_heading_less_leading_slide() {
+        // Content before the first heading forms a leading slide; a layout
+        // override on its first chunk must be honoured (Req 1).
+        let mut doc = Document::new("D");
+        let mut t = Chunk::new_text(0, "lead paragraph");
+        t.metadata.layout = Some(SLIDE_LAYOUT_TITLE_IMAGE.to_string());
+        doc.chunks.push(t);
+        let deck = document_to_deck(&doc);
+        assert_eq!(deck.slides.len(), 1);
+        assert_eq!(deck.slides[0].layout, SLIDE_LAYOUT_TITLE_IMAGE);
     }
 
     #[test]

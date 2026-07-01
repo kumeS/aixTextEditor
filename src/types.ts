@@ -12,7 +12,9 @@ export interface ChunkMetadata {
   linkedChunks: string[];
   imagePrompt?: string; // image chunks: prompt used, for "regenerate"
   contentHistory?: string[]; // prior content values (text versions / image URLs)
-  layout?: SlideLayout; // heading chunks: explicit slide-layout override
+  layout?: SlideLayout; // slide lead chunk: explicit slide-layout override
+  subtitle?: boolean; // text chunk flagged as a subtitle (Req 3)
+  slideBody?: string[]; // slide-only body override — "detach" from prose (Req 2)
 }
 
 export interface Chunk {
@@ -35,6 +37,27 @@ export interface Document {
   chunks: Chunk[];
   mode?: DocMode; // defaults to "editor" when absent (back-compat)
   analysis?: AnalysisResult; // persisted relationship graph (spec §3.4)
+}
+
+/** Result of opening a `.aix` file: the document plus any repairs made on load (A1). */
+export interface OpenedDocument {
+  document: Document;
+  notes: string[];
+}
+
+/** One tab persisted for crash recovery / session restore (A2). */
+export interface PersistedTab {
+  id: string;
+  doc: Document;
+  filePath: string | null;
+  dirty: boolean;
+}
+
+/** The autosaved multi-tab working set (A2). */
+export interface SessionData {
+  tabs: PersistedTab[];
+  activeTabId: string;
+  savedAt: number;
 }
 
 // Slide deck model (v1.2.0). A slide reuses editor Chunks (heading = title,

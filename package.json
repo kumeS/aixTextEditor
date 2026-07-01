@@ -1,7 +1,7 @@
 {
   "name": "aix-text-editor",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "module",
   "description": "aixTextEditor — an LLM-augmented, chunk-based editor for academic papers and long-form reports.",
   "author": "Satoshi Kume",
@@ -10,6 +10,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -32,6 +34,17 @@
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4"
+    "vite": "^7.0.4",
+    "vitest": "^3.2.6"
+  },
+  "comments": {
+    "overrides": "esbuild pinned to >=0.28.1 to patch GHSA-g7r4-m6w7-qqqr (dev-server file read on Windows). vite 7.x pins esbuild ^0.27.0, but 0.28.x is API-compatible (vite 8 uses it). This is a dev/build-time tool only — not bundled into the shipped app. Remove the override once vite ships a release on a patched esbuild."
+  },
+  "overrides": {
+    "esbuild": ">=0.28.1"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "fsevents@2.3.3": true
   }
 }

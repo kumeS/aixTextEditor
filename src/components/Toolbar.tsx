@@ -51,6 +51,8 @@ function ToolButton({
 export default function Toolbar() {
   const globalBusy = useStore((s) => s.globalBusy);
   const hasApiKey = useStore((s) => s.hasApiKey);
+  const mode = useStore((s) => s.doc.mode ?? "editor");
+  const setMode = useStore((s) => s.setMode);
   const model = useStore((s) => s.settings?.model ?? "");
   const canUndo = useStore((s) => s.past.length > 0);
   const canRedo = useStore((s) => s.future.length > 0);
@@ -94,7 +96,7 @@ export default function Toolbar() {
   };
 
   return (
-    <header className="sticky top-0 z-20 flex items-center gap-1 border-b border-gray-200 bg-white/90 px-3 py-1.5 backdrop-blur">
+    <header className="sticky top-0 z-20 flex flex-wrap items-center gap-1 border-b border-gray-200 bg-white/90 px-3 py-1.5 backdrop-blur">
       <div className="flex items-center gap-0.5">
         <ToolButton onClick={() => void openNative()} title="Open .aix document in a new tab">
           <FolderIcon /> Open
@@ -151,6 +153,26 @@ export default function Toolbar() {
 
       <div className="mx-1 h-5 w-px bg-gray-200" />
 
+      {/* View mode: switch the current document between prose Editor and Slides.
+          Both are the same chunks, presented differently. */}
+      <span className="shrink-0 pr-0.5 text-xs font-medium text-ink-faint">View</span>
+      <div className="flex shrink-0 overflow-hidden rounded-md border border-gray-200 text-sm shadow-sm">
+        {(["editor", "slide"] as const).map((m) => (
+          <button
+            key={m}
+            onClick={() => setMode(m)}
+            title={m === "editor" ? "Prose editor view" : "Slide deck view"}
+            className={`px-2.5 py-1 ${
+              mode === m ? "bg-accent text-white" : "bg-white text-ink-soft hover:bg-gray-100"
+            }`}
+          >
+            {m === "editor" ? "Editor" : "Slides"}
+          </button>
+        ))}
+      </div>
+
+      <div className="mx-1 h-5 w-px bg-gray-200" />
+
       <ToolButton onClick={undo} title="Undo (⌘/Ctrl+Z)" disabled={!canUndo}>
         Undo
       </ToolButton>
@@ -173,6 +195,9 @@ export default function Toolbar() {
           if (networkOpen) toggleNetwork(false);
           else void analyzeDocument();
         }}
+        // UI2: don't let a second Analyze start while one is running (analyzeDocument
+        // also guards internally); "Hide graph" stays available.
+        disabled={!networkOpen && !!globalBusy}
         title="Analyze relationships → network graph"
       >
         <NetworkIcon /> {networkOpen ? "Hide graph" : "Analyze"}
@@ -182,31 +207,32 @@ export default function Toolbar() {
         <HelpIcon /> Help
       </ToolButton>
 
-      {/* spacer */}
-      <div className="flex-1" />
+      {/* Right cluster: hugs the right edge on wide windows, wraps cleanly on
+          narrow ones (ml-auto instead of a flex-1 spacer, so nothing is clipped). */}
+      <div className="ml-auto flex items-center gap-1">
+        {globalBusy && (
+          <div className="mr-2 flex items-center gap-1.5 text-sm text-accent">
+            <SpinnerIcon className="text-accent" /> {globalBusy}
+          </div>
+        )}
 
-      {globalBusy && (
-        <div className="mr-2 flex items-center gap-1.5 text-sm text-accent">
-          <SpinnerIcon className="text-accent" /> {globalBusy}
-        </div>
-      )}
-
-      <button
-        onClick={openSettings}
-        title={
-          hasApiKey
-            ? `Model: ${model || "(default)"}`
-            : "API key not set — click to configure"
-        }
-        className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-ink-soft hover:bg-gray-100 hover:text-ink"
-      >
-        <span
-          className={`h-2 w-2 rounded-full ${
-            hasApiKey ? "bg-emerald-500" : "bg-amber-400"
-          }`}
-        />
-        <SettingsIcon />
-      </button>
+        <button
+          onClick={openSettings}
+          title={
+            hasApiKey
+              ? `Model: ${model || "(default)"}`
+              : "API key not set — click to configure"
+          }
+          className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-ink-soft hover:bg-gray-100 hover:text-ink"
+        >
+          <span
+            className={`h-2 w-2 rounded-full ${
+              hasApiKey ? "bg-emerald-500" : "bg-amber-400"
+            }`}
+          />
+          <SettingsIcon />
+        </button>
+      </div>
     </header>
   );
 }

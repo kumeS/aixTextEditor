@@ -13,7 +13,16 @@ export default function Editor() {
   const title = useStore((s) => s.doc.title);
   const setTitle = useStore((s) => s.setTitle);
   const addChunkAfter = useStore((s) => s.addChunkAfter);
+  const setChunkSubtitle = useStore((s) => s.setChunkSubtitle);
+  const focusedChunkId = useStore((s) => s.focusedChunkId);
   const chunkIds = useStore(useShallow((s) => s.doc.chunks.map((c) => c.id)));
+
+  // Insert after the focused chunk (else append). "Subtitle" is a text chunk
+  // flagged as a subtitle, which maps to the slide's subtitle in Slide mode.
+  const addSubtitle = () => {
+    const id = addChunkAfter(focusedChunkId, "text");
+    setChunkSubtitle(id, true);
+  };
 
   return (
     <div className="mx-auto w-full max-w-prose px-12 py-16">
@@ -30,12 +39,28 @@ export default function Editor() {
         ))}
       </div>
 
-      <button
-        onClick={() => addChunkAfter(null, "text")}
-        className="mt-8 flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-ink-faint hover:bg-gray-100 hover:text-accent"
-      >
-        <PlusIcon /> Add paragraph
-      </button>
+      <div className="mt-8 flex flex-wrap items-center gap-1.5 text-sm text-ink-faint">
+        <button
+          onClick={() => addChunkAfter(focusedChunkId, "text")}
+          className="flex items-center gap-1.5 rounded-md px-2 py-1 hover:bg-gray-100 hover:text-accent"
+        >
+          <PlusIcon /> Add paragraph
+        </button>
+        <button
+          onClick={() => addChunkAfter(focusedChunkId, "heading")}
+          className="flex items-center gap-1.5 rounded-md px-2 py-1 hover:bg-gray-100 hover:text-accent"
+          title="A heading is a slide title in Slide mode"
+        >
+          <PlusIcon /> Add heading
+        </button>
+        <button
+          onClick={addSubtitle}
+          className="flex items-center gap-1.5 rounded-md px-2 py-1 hover:bg-gray-100 hover:text-accent"
+          title="A subtitle sits under the title / slide title"
+        >
+          <PlusIcon /> Add subtitle
+        </button>
+      </div>
     </div>
   );
 }

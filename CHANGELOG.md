@@ -1,5 +1,54 @@
 # Changelog
 
+## v1.2.0 — 2026-07-01
+
+Slides. Adds a full presentation mode alongside the text editor, plus a
+security- and stability-focused bug-fix pass.
+
+### Slides & PPTX
+
+- **Slides mode** — a new **Editor / Slides** toolbar toggle turns the current
+  document into an editable deck (headings → titles, paragraphs → bullets), with
+  a live deck preview kept in sync with the export. New tabs are added directly
+  with the "+" button.
+- **Per-slide layouts** — apply `section` / `title-content` / `title-image` to
+  any slide (including a heading-less opening slide), so a slide isn't forced
+  into a bullet list.
+- **Title & subtitle** — mark a paragraph as a **subtitle** (Add subtitle, or the
+  "S" control); it renders under the title and fills the slide's subtitle box —
+  the same structure AI Draft produces, now insertable by hand.
+- **Detach a slide** — "Summarize → slide" turns a slide's text into its own
+  concise summary that lives independently of the document prose (edit it in
+  place, or **Re-link** to reconnect); apply a custom layout on top.
+- **Export to PowerPoint (`.pptx`)** — deterministic, AI-free conversion, from
+  both the toolbar and the native File ▸ Export menu; on-screen preview and the
+  exported deck now match (section layout, subtitles, heading-less titles).
+
+### Fixes & hardening (Bug_report_v1 pass)
+
+- Fixed a PPTX export failure caused by control characters in slide text
+  (previously produced an unopenable file); broader image-format support
+  (PNG/JPEG/GIF/BMP) with clear warnings for unsupported ones.
+- `.aix` files are now validated and repaired on open (duplicate ids, dangling
+  references, out-of-range values) instead of silently corrupting state.
+- Network hardening for document image/URL fetches: SSRF guard against
+  private/loopback/metadata addresses, response **size limits** + timeouts, and
+  a tightened **Content-Security-Policy**; path-extension checks on writes.
+- Per-tab in-flight state is fully isolated — no spinner/analysis leaks between
+  open tabs.
+- **Autosave & crash recovery** of open tabs; the relationship graph now flags
+  itself out-of-date when its source paragraphs change (and prunes deleted ones).
+- Read-aloud (text-to-speech) lifecycle fixed — the button clears when playback
+  ends and no longer cross-wires between paragraphs.
+- **Save As…**, native-menu PPTX export, undo-consistent analysis, and slide
+  editing that respects slide boundaries.
+
+### Other
+
+- On macOS, **closing the window keeps the app running** — re-open it from the
+  Dock; Cmd+Q quits.
+- Pinned build-time **esbuild** (>= 0.28.1) to patch GHSA-g7r4-m6w7-qqqr.
+
 ## v1.1.0 — 2026-06-22
 
 Feature update focused on language consistency, drafting, illustration and

@@ -9,6 +9,7 @@ import { CloseIcon, NetworkIcon, SpinnerIcon } from "./icons";
 
 export default function NetworkPanel() {
   const analysis = useStore((s) => s.analysis);
+  const analysisStale = useStore((s) => s.analysisStale);
   const globalBusy = useStore((s) => s.globalBusy);
   const flashChunk = useStore((s) => s.flashChunk);
   const toggleNetwork = useStore((s) => s.toggleNetwork);
@@ -163,11 +164,23 @@ export default function NetworkPanel() {
       <div className="flex items-center justify-between border-b border-gray-200 px-3 py-2">
         <div className="flex items-center gap-1.5 text-sm font-semibold text-ink">
           <NetworkIcon /> Relationships
+          {!isEmpty && analysisStale && (
+            <span
+              className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
+              title="The document changed since this graph was built — click Refresh to re-analyze."
+            >
+              out of date
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <button
             onClick={() => void analyzeDocument()}
-            className="rounded px-2 py-1 text-xs text-ink-soft hover:bg-gray-100"
+            className={`rounded px-2 py-1 text-xs hover:bg-gray-100 ${
+              !isEmpty && analysisStale
+                ? "font-medium text-amber-700"
+                : "text-ink-soft"
+            }`}
             disabled={!!globalBusy}
             title="Re-analyze document"
           >

@@ -73,7 +73,14 @@ fn run(cmd: &str, rest: &[String]) -> Result<(), String> {
 
 fn load(path: &str) -> Result<Document, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("read {path}: {e}"))?;
-    serde_json::from_str(&text).map_err(|e| format!("parse {path} (expected .aix JSON): {e}"))
+    let mut doc: Document = serde_json::from_str(&text)
+        .map_err(|e| format!("parse {path} (expected .aix JSON): {e}"))?;
+    // Repair invariants the same way the GUI load path does (A1); surface fixes
+    // on stderr so a scripting/agent caller can see what was changed.
+    for note in doc.normalize() {
+        eprintln!("note: {note}");
+    }
+    Ok(doc)
 }
 
 fn export(doc: &Document, output: &str) -> Result<(), String> {

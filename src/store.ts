@@ -12,6 +12,7 @@ import type {
   ChunkType,
   DocMode,
   Document,
+  PersistedTab,
   Settings,
   SlideLayout,
 } from "./types";
@@ -87,6 +88,42 @@ function rebuildAnalysis(doc: Document): AnalysisResult | null {
   return { nodes, edges };
 }
 
+/**
+ * Drop analysis nodes/edges that reference chunks no longer in the document
+ * (A3). Cheap and deterministic — keeps the persisted graph from pointing at
+ * deleted paragraphs after a structural edit. Sentence nodes survive iff their
+ * owning paragraph does.
+ */
+function pruneAnalysis(
+  a: AnalysisResult | null | undefined,
+  validIds: Set<string>
+): AnalysisResult | null {
+  if (!a) return null;
+  const nodes = a.nodes.filter((n) =>
+    n.kind === "sentence" ? !!n.parent && validIds.has(n.parent) : validIds.has(n.id)
+  );
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  const edges = a.edges.filter(
+    (e) => nodeIds.has(e.source) && nodeIds.has(e.target)
+  );
+  return { nodes, edges };
+}
+
+/**
+ * True if a document's persisted graph references chunks it no longer contains
+ * — i.e. the graph is structurally out of date (A3). Used by undo/redo to
+ * recompute the staleness badge for a restored snapshot.
+ */
+function structurallyStale(doc: Document): boolean {
+  const a = doc.analysis;
+  if (!a) return false;
+  const ids = new Set(doc.chunks.map((c) => c.id));
+  return (
+    a.nodes.some((n) => (n.kind === "sentence" ? !!n.parent && !ids.has(n.parent) : !ids.has(n.id))) ||
+    a.edges.some((e) => !ids.has(e.source) || !ids.has(e.target))
+  );
+}
+
 export type ToastKind = "info" | "success" | "error";
 export interface Toast {
   id: number;
@@ -107,8 +144,16 @@ interface TabSnapshot {
   past: Document[];
   future: Document[];
   analysis: AnalysisResult | null;
+  analysisStale: boolean;
   focusedChunkId: string | null;
   lastEditChunkId: string | null;
+  // In-flight operation state is PER-TAB (B3) — captured here so it doesn't leak
+  // onto another tab on switch (a false "Drafting…" spinner) and a background
+  // op's completion doesn't clear the foreground tab's state.
+  globalBusy: string | null;
+  streamingChunkId: string | null;
+  streamingText: string;
+  busyChunks: Record<string, boolean>;
 }
 
 function snapshotActive(s: AppState): TabSnapshot {
@@ -119,8 +164,13 @@ function snapshotActive(s: AppState): TabSnapshot {
     past: s.past,
     future: s.future,
     analysis: s.analysis,
+    analysisStale: s.analysisStale,
     focusedChunkId: s.focusedChunkId,
     lastEditChunkId: s.lastEditChunkId,
+    globalBusy: s.globalBusy,
+    streamingChunkId: s.streamingChunkId,
+    streamingText: s.streamingText,
+    busyChunks: s.busyChunks,
   };
 }
 
@@ -132,8 +182,13 @@ function applySnapshot(snap: TabSnapshot) {
     past: snap.past,
     future: snap.future,
     analysis: snap.analysis,
+    analysisStale: snap.analysisStale,
     focusedChunkId: snap.focusedChunkId,
     lastEditChunkId: snap.lastEditChunkId,
+    globalBusy: snap.globalBusy,
+    streamingChunkId: snap.streamingChunkId,
+    streamingText: snap.streamingText,
+    busyChunks: snap.busyChunks,
     flashChunkId: null,
     selectedChunkIds: [],
     lastAiEditChunkId: null,
@@ -165,8 +220,15 @@ interface AppState {
   // real content is untouched until the stream finalises.
   streamingChunkId: string | null;
   streamingText: string;
+  // Read-aloud (UI3): the single chunk currently being spoken, plus the backend
+  // utterance id so a stale `speech-done` event can't clear a newer playback.
+  speakingChunkId: string | null;
+  speakingUtterance: number | null;
 
   analysis: AnalysisResult | null;
+  // True when the persisted graph no longer matches the edited document (A3) —
+  // drives the NetworkPanel "out of date" badge.
+  analysisStale: boolean;
   networkOpen: boolean;
   settingsOpen: boolean;
   draftOpen: boolean;
@@ -193,7 +255,9 @@ interface AppActions {
   newTab: (mode?: DocMode) => void;
   switchTab: (id: string) => void;
   closeTab: (id: string) => void;
+  hydrateSession: (tabs: PersistedTab[], activeTabId: string) => void;
   setTitle: (title: string) => void;
+  setMode: (mode: DocMode) => void;
 
   updateChunkContent: (id: string, content: string) => void;
   replaceChunkContent: (id: string, content: string) => void; // undoable (AI results)
@@ -216,17 +280,24 @@ interface AppActions {
   deleteChunks: (ids: string[]) => void;
   duplicateChunksAfter: (ids: string[]) => string[];
   setChunkLayout: (id: string, layout: SlideLayout) => void;
+  setChunkSubtitle: (id: string, subtitle: boolean) => void;
+  setSlideBody: (leadId: string, body: string[] | null) => void;
   replaceChunksWithTexts: (ids: string[], texts: string[]) => void;
 
   setFocused: (id: string | null) => void;
   flashChunk: (id: string) => void;
   toggleSelectChunk: (id: string) => void;
   clearSelection: () => void;
-  setBusyChunk: (id: string, busy: boolean) => void;
-  setGlobalBusy: (label: string | null) => void;
-  beginChunkStream: (id: string) => void;
-  updateChunkStream: (text: string) => void;
-  endChunkStream: () => void;
+  // In-flight op setters take an optional `tabId` so a background operation
+  // updates ITS OWN tab, not whatever tab is active when it resolves (B3).
+  setBusyChunk: (id: string, busy: boolean, tabId?: string) => void;
+  setGlobalBusy: (label: string | null, tabId?: string) => void;
+  beginChunkStream: (id: string, tabId?: string) => void;
+  updateChunkStream: (text: string, tabId?: string) => void;
+  endChunkStream: (tabId?: string) => void;
+  // Read-aloud lifecycle (UI3).
+  beginSpeaking: (chunkId: string, utterance: number) => void;
+  endSpeaking: (utterance?: number) => void;
 
   setSettings: (settings: Settings) => void;
   setHasApiKey: (has: boolean) => void;
@@ -267,15 +338,43 @@ function makeInitialDoc(mode: DocMode = "editor"): Document {
 }
 
 export const useStore = create<AppState & AppActions>((set, get) => {
-  /** Apply a structural/undoable mutation, snapshotting history first. */
-  const commit = (producer: (doc: Document) => Document) => {
+  /**
+   * Apply a structural/undoable mutation, snapshotting history first. By default
+   * it also marks the relationship graph stale (A3); pure metadata edits
+   * (layout, heading level, summary) pass `{ marksStale: false }` so they don't
+   * trip the "out of date" badge.
+   */
+  const commit = (
+    producer: (doc: Document) => Document,
+    opts?: { marksStale?: boolean }
+  ) => {
     set((state) => {
       const snapshot = state.doc;
       const next = producer(snapshot);
       const past = [...state.past, snapshot].slice(-MAX_HISTORY);
-      return { doc: next, past, future: [], dirty: true, lastEditChunkId: null };
+      return {
+        doc: next,
+        past,
+        future: [],
+        dirty: true,
+        lastEditChunkId: null,
+        analysisStale: (opts?.marksStale ?? true) ? true : state.analysisStale,
+      };
     });
   };
+
+  /**
+   * Route an in-flight-op patch to the tab that OWNS the op (B3). For the active
+   * tab it patches the top-level fields; for a background tab it patches that
+   * tab's snapshot; if the tab was closed mid-op it is a no-op (no phantom).
+   */
+  const routeTabPatch = (tabId: string, patch: Partial<TabSnapshot>) =>
+    set((s) => {
+      if (tabId === s.activeTabId) return patch;
+      const snap = s.inactiveTabs[tabId];
+      if (!snap) return {};
+      return { inactiveTabs: { ...s.inactiveTabs, [tabId]: { ...snap, ...patch } } };
+    });
 
   const mapChunks = (doc: Document, fn: (chunks: Chunk[]) => Chunk[]): Document => ({
     ...doc,
@@ -298,7 +397,10 @@ export const useStore = create<AppState & AppActions>((set, get) => {
     globalBusy: null,
     streamingChunkId: null,
     streamingText: "",
+    speakingChunkId: null,
+    speakingUtterance: null,
     analysis: null,
+    analysisStale: false,
     networkOpen: false,
     settingsOpen: false,
     draftOpen: false,
@@ -322,6 +424,7 @@ export const useStore = create<AppState & AppActions>((set, get) => {
         // Prefer the persisted full graph (paragraph + sentence nodes); fall back
         // to reconstructing a paragraph-only graph from older linkedChunks docs.
         analysis: doc.analysis ?? rebuildAnalysis(doc),
+        analysisStale: false,
         focusedChunkId: doc.chunks[0]?.id ?? null,
         lastEditChunkId: null,
         lastAiEditChunkId: null,
@@ -348,11 +451,17 @@ export const useStore = create<AppState & AppActions>((set, get) => {
           past: [],
           future: [],
           analysis: null,
+          analysisStale: false,
           focusedChunkId: fresh.chunks[0]?.id ?? null,
           lastEditChunkId: null,
           lastAiEditChunkId: null,
           flashChunkId: null,
           selectedChunkIds: [],
+          // A fresh tab starts with no in-flight operations (B3).
+          globalBusy: null,
+          streamingChunkId: null,
+          streamingText: "",
+          busyChunks: {},
         };
       }),
 
@@ -392,8 +501,67 @@ export const useStore = create<AppState & AppActions>((set, get) => {
         };
       }),
 
+    // Restore a saved multi-tab session (A2). Cannot reuse loadDocument (which
+    // collapses to a single tab) — rebuilds the active fields + every background
+    // tab's snapshot from the persisted set.
+    hydrateSession: (tabs, activeTabId) =>
+      set(() => {
+        const active = tabs.find((t) => t.id === activeTabId) ?? tabs[0];
+        if (!active) return {};
+        const inactiveTabs: Record<string, TabSnapshot> = {};
+        for (const t of tabs) {
+          if (t.id === active.id) continue;
+          inactiveTabs[t.id] = {
+            doc: t.doc,
+            filePath: t.filePath,
+            dirty: t.dirty,
+            past: [],
+            future: [],
+            analysis: t.doc.analysis ?? rebuildAnalysis(t.doc),
+            analysisStale: false,
+            focusedChunkId: t.doc.chunks[0]?.id ?? null,
+            lastEditChunkId: null,
+            globalBusy: null,
+            streamingChunkId: null,
+            streamingText: "",
+            busyChunks: {},
+          };
+        }
+        return {
+          tabOrder: tabs.map((t) => t.id),
+          activeTabId: active.id,
+          inactiveTabs,
+          doc: active.doc,
+          filePath: active.filePath,
+          dirty: active.dirty,
+          past: [],
+          future: [],
+          analysis: active.doc.analysis ?? rebuildAnalysis(active.doc),
+          analysisStale: false,
+          focusedChunkId: active.doc.chunks[0]?.id ?? null,
+          lastEditChunkId: null,
+          lastAiEditChunkId: null,
+          flashChunkId: null,
+          selectedChunkIds: [],
+          globalBusy: null,
+          streamingChunkId: null,
+          streamingText: "",
+          busyChunks: {},
+        };
+      }),
+
     setTitle: (title) =>
       set((s) => ({ doc: { ...s.doc, title }, dirty: true })),
+
+    // Switch the current document between "editor" (prose) and "slide" (deck)
+    // views. Both render the SAME chunk model — a slide is just the chunks under
+    // a heading — so this only flips how they're presented; no content migration.
+    setMode: (mode) =>
+      set((s) =>
+        (s.doc.mode ?? "editor") === mode
+          ? {}
+          : { doc: { ...s.doc, mode }, dirty: true }
+      ),
 
     // Live typing: coalesce into one undo step per continuous edit session on a
     // chunk. Replaces only the edited chunk object (others keep identity).
@@ -414,6 +582,7 @@ export const useStore = create<AppState & AppActions>((set, get) => {
           lastEditChunkId: id,
           // Manual typing dismisses any pending AI-change highlight.
           lastAiEditChunkId: null,
+          analysisStale: true, // edited text → graph is out of date (A3)
         };
       }),
 
@@ -447,6 +616,7 @@ export const useStore = create<AppState & AppActions>((set, get) => {
           dirty: true,
           lastEditChunkId: null,
           lastAiEditChunkId: id,
+          analysisStale: true, // AI-replaced text → graph is out of date (A3)
         };
       }),
 
@@ -472,27 +642,33 @@ export const useStore = create<AppState & AppActions>((set, get) => {
           })
         );
         const past = [...state.past, snapshot].slice(-MAX_HISTORY);
-        return { doc: next, past, future: [], dirty: true, lastEditChunkId: null };
+        return {
+          doc: next,
+          past,
+          future: [],
+          dirty: true,
+          lastEditChunkId: null,
+          analysisStale: true, // swapped version → graph is out of date (A3)
+        };
       }),
 
     dismissAiEdit: () => set({ lastAiEditChunkId: null }),
 
     setChunkSummary: (id, summary) =>
-      // The summary is part of the persisted document model (spec §5), so this
-      // must mark the document dirty (otherwise the save/discard guard never
-      // fires and the summary is silently lost). Clearing `future` also stops a
-      // pending redo from clobbering the freshly-written summary.
-      set((state) => ({
-        doc: mapChunks(state.doc, (chunks) =>
-          chunks.map((c) =>
-            c.id === id
-              ? { ...c, metadata: { ...c.metadata, summary } }
-              : c
-          )
-        ),
-        dirty: true,
-        future: [],
-      })),
+      // Route through commit() so adding/updating a summary is undoable and
+      // redo-safe like its metadata peers (B8) — the previous hand-rolled set()
+      // cleared `future` but never pushed to `past`, so the edit was lost on
+      // undo. A summary is metadata enrichment, so it doesn't invalidate the
+      // relationship graph (A3 → marksStale:false).
+      commit(
+        (doc) =>
+          mapChunks(doc, (chunks) =>
+            chunks.map((c) =>
+              c.id === id ? { ...c, metadata: { ...c.metadata, summary } } : c
+            )
+          ),
+        { marksStale: false }
+      ),
 
     setChunkType: (id, type) =>
       commit((doc) =>
@@ -517,17 +693,19 @@ export const useStore = create<AppState & AppActions>((set, get) => {
       ),
 
     setHeadingLevel: (id, level) =>
-      commit((doc) =>
-        mapChunks(doc, (chunks) =>
-          chunks.map((c) =>
-            c.id === id
-              ? {
-                  ...c,
-                  metadata: { ...c.metadata, chunkType: "heading", level },
-                }
-              : c
-          )
-        )
+      commit(
+        (doc) =>
+          mapChunks(doc, (chunks) =>
+            chunks.map((c) =>
+              c.id === id
+                ? {
+                    ...c,
+                    metadata: { ...c.metadata, chunkType: "heading", level },
+                  }
+                : c
+            )
+          ),
+        { marksStale: false }
       ),
 
     convertToHeading: (id, level, content) =>
@@ -645,10 +823,16 @@ export const useStore = create<AppState & AppActions>((set, get) => {
       // Move focus to a sensible neighbour (previous, else next) so the caret
       // doesn't fall through to <body> after the deleted chunk unmounts.
       const neighbour = chunks[idx - 1] ?? chunks[idx + 1];
-      commit((doc) =>
-        mapChunks(doc, (cs) => reindex(cs.filter((c) => c.id !== id)))
-      );
-      set({ focusedChunkId: neighbour ? neighbour.id : null });
+      const validIds = new Set(chunks.filter((c) => c.id !== id).map((c) => c.id));
+      commit((doc) => ({
+        ...mapChunks(doc, (cs) => reindex(cs.filter((c) => c.id !== id))),
+        // Prune the persisted graph of the deleted paragraph (A3).
+        analysis: pruneAnalysis(doc.analysis, validIds) ?? undefined,
+      }));
+      set({
+        focusedChunkId: neighbour ? neighbour.id : null,
+        analysis: pruneAnalysis(get().analysis, validIds),
+      });
     },
 
     mergeWithPrevious: (id) => {
@@ -662,16 +846,21 @@ export const useStore = create<AppState & AppActions>((set, get) => {
       }
       const mergedContent = prev.content + cur.content;
       const caretTarget = prev.id;
-      commit((doc) =>
-        mapChunks(doc, (cs) => {
+      const validIds = new Set(chunks.filter((c) => c.id !== id).map((c) => c.id));
+      commit((doc) => ({
+        ...mapChunks(doc, (cs) => {
           const i = cs.findIndex((c) => c.id === id);
           const next = [...cs];
           next[i - 1] = { ...next[i - 1], content: mergedContent };
           next.splice(i, 1);
           return reindex(next);
-        })
-      );
-      set({ focusedChunkId: caretTarget });
+        }),
+        analysis: pruneAnalysis(doc.analysis, validIds) ?? undefined,
+      }));
+      set({
+        focusedChunkId: caretTarget,
+        analysis: pruneAnalysis(get().analysis, validIds),
+      });
       return caretTarget;
     },
 
@@ -679,20 +868,24 @@ export const useStore = create<AppState & AppActions>((set, get) => {
     // Reorder the whole chunk list to match `orderedIds` (chunks not listed are
     // appended in their existing order, as a safety net). Undoable.
     setChunkOrder: (orderedIds) =>
-      commit((doc) =>
-        mapChunks(doc, (chunks) => {
-          const byId = new Map(chunks.map((c) => [c.id, c] as const));
-          const ordered: Chunk[] = [];
-          for (const id of orderedIds) {
-            const c = byId.get(id);
-            if (c) ordered.push(c);
-          }
-          if (ordered.length !== chunks.length) {
-            const seen = new Set(orderedIds);
-            for (const c of chunks) if (!seen.has(c.id)) ordered.push(c);
-          }
-          return reindex(ordered);
-        })
+      commit(
+        (doc) =>
+          mapChunks(doc, (chunks) => {
+            const byId = new Map(chunks.map((c) => [c.id, c] as const));
+            const ordered: Chunk[] = [];
+            for (const id of orderedIds) {
+              const c = byId.get(id);
+              if (c) ordered.push(c);
+            }
+            if (ordered.length !== chunks.length) {
+              const seen = new Set(orderedIds);
+              for (const c of chunks) if (!seen.has(c.id)) ordered.push(c);
+            }
+            return reindex(ordered);
+          }),
+        // Reordering keeps every id-based relationship intact, so the graph is
+        // still valid (A3 — don't false-flag it "out of date").
+        { marksStale: false }
       ),
 
     // Delete a set of chunks at once (e.g. a whole slide). Keeps ≥1 chunk.
@@ -704,50 +897,125 @@ export const useStore = create<AppState & AppActions>((set, get) => {
       const remaining = chunks.filter((c) => !idSet.has(c.id));
       if (remaining.length === 0) {
         const replacement = emptyChunk(0);
-        commit((doc) => mapChunks(doc, () => [replacement]));
-        set({ focusedChunkId: replacement.id, selectedChunkIds: [] });
+        const validIds = new Set([replacement.id]);
+        commit((doc) => ({
+          ...mapChunks(doc, () => [replacement]),
+          analysis: pruneAnalysis(doc.analysis, validIds) ?? undefined,
+        }));
+        set({
+          focusedChunkId: replacement.id,
+          selectedChunkIds: [],
+          analysis: pruneAnalysis(get().analysis, validIds),
+        });
         return;
       }
       const neighbour = chunks[firstIdx - 1] ?? remaining[0];
-      commit((doc) =>
-        mapChunks(doc, (cs) => reindex(cs.filter((c) => !idSet.has(c.id))))
-      );
-      set({ focusedChunkId: neighbour ? neighbour.id : null, selectedChunkIds: [] });
+      const validIds = new Set(remaining.map((c) => c.id));
+      commit((doc) => ({
+        ...mapChunks(doc, (cs) => reindex(cs.filter((c) => !idSet.has(c.id)))),
+        analysis: pruneAnalysis(doc.analysis, validIds) ?? undefined,
+      }));
+      set({
+        focusedChunkId: neighbour ? neighbour.id : null,
+        selectedChunkIds: [],
+        analysis: pruneAnalysis(get().analysis, validIds),
+      });
     },
 
-    // Clone the given chunks (fresh ids) and insert them right after the last of
-    // them — used to duplicate a slide. Graph links/history are not carried over.
+    // Clone the given chunks (fresh ids) and insert the copies — used to
+    // duplicate a slide. Graph links/history are not carried over.
     duplicateChunksAfter: (ids) => {
       const idSet = new Set(ids);
       const chunks = get().doc.chunks;
-      const group = chunks.filter((c) => idSet.has(c.id));
+      const group = chunks.filter((c) => idSet.has(c.id)); // document order
       if (group.length === 0) return [];
-      const clones: Chunk[] = group.map((c) => ({
+
+      const clone = (c: Chunk): Chunk => ({
         ...c,
         id: localId(),
         metadata: { ...c.metadata, linkedChunks: [], contentHistory: undefined },
-      }));
-      const lastId = group[group.length - 1].id;
+      });
+
+      // B7: the slide-duplicate caller passes a CONTIGUOUS block; only insert the
+      // copies as one block after the last selected chunk when they really are
+      // adjacent. For a non-contiguous selection, insert each copy immediately
+      // after its own source instead — a copy can never land between unrelated
+      // chunks (which would silently re-cut slide boundaries).
+      const indices = group.map((c) => chunks.findIndex((x) => x.id === c.id));
+      const contiguous = indices.every((v, i) => i === 0 || v === indices[i - 1] + 1);
+
+      if (contiguous) {
+        const clones = group.map(clone);
+        const lastId = group[group.length - 1].id;
+        commit((doc) =>
+          mapChunks(doc, (cs) => {
+            const idx = cs.findIndex((c) => c.id === lastId);
+            const next = [...cs];
+            next.splice(idx + 1, 0, ...clones);
+            return reindex(next);
+          })
+        );
+        set({ focusedChunkId: clones[0]?.id ?? null });
+        return clones.map((c) => c.id);
+      }
+
+      const cloneBySource = new Map<string, Chunk>();
+      for (const c of group) cloneBySource.set(c.id, clone(c));
       commit((doc) =>
         mapChunks(doc, (cs) => {
-          const idx = cs.findIndex((c) => c.id === lastId);
-          const next = [...cs];
-          next.splice(idx + 1, 0, ...clones);
+          const next: Chunk[] = [];
+          for (const c of cs) {
+            next.push(c);
+            const cl = cloneBySource.get(c.id);
+            if (cl) next.push(cl);
+          }
           return reindex(next);
         })
       );
-      set({ focusedChunkId: clones[0]?.id ?? null });
-      return clones.map((c) => c.id);
+      const orderedCloneIds = group.map((c) => cloneBySource.get(c.id)!.id);
+      set({ focusedChunkId: orderedCloneIds[0] ?? null });
+      return orderedCloneIds;
     },
 
-    // Set an explicit slide-layout override on a (heading) chunk.
+    // Set an explicit slide-layout override on a slide's lead chunk. Layout is a
+    // slide-presentation attribute, unrelated to the relationship graph (A3).
     setChunkLayout: (id, layout) =>
-      commit((doc) =>
-        mapChunks(doc, (chunks) =>
-          chunks.map((c) =>
-            c.id === id ? { ...c, metadata: { ...c.metadata, layout } } : c
-          )
-        )
+      commit(
+        (doc) =>
+          mapChunks(doc, (chunks) =>
+            chunks.map((c) =>
+              c.id === id ? { ...c, metadata: { ...c.metadata, layout } } : c
+            )
+          ),
+        { marksStale: false }
+      ),
+
+    // Flag/unflag a text chunk as a subtitle (Req 3). Presentation-only, so it
+    // doesn't invalidate the relationship graph.
+    setChunkSubtitle: (id, subtitle) =>
+      commit(
+        (doc) =>
+          mapChunks(doc, (chunks) =>
+            chunks.map((c) =>
+              c.id === id ? { ...c, metadata: { ...c.metadata, subtitle } } : c
+            )
+          ),
+        { marksStale: false }
+      ),
+
+    // Detach/re-link a slide (Req 2): store custom `slideBody` lines on the
+    // slide's lead chunk (detach), or pass null to clear it (re-link to prose).
+    setSlideBody: (leadId, body) =>
+      commit(
+        (doc) =>
+          mapChunks(doc, (chunks) =>
+            chunks.map((c) =>
+              c.id === leadId
+                ? { ...c, metadata: { ...c.metadata, slideBody: body ?? undefined } }
+                : c
+            )
+          ),
+        { marksStale: false }
       ),
 
     // Replace a set of chunks with fresh text chunks (one per string), inserted
@@ -779,15 +1047,17 @@ export const useStore = create<AppState & AppActions>((set, get) => {
     },
 
     moveChunk: (id, dir) =>
-      commit((doc) =>
-        mapChunks(doc, (chunks) => {
-          const idx = chunks.findIndex((c) => c.id === id);
-          const target = idx + dir;
-          if (idx < 0 || target < 0 || target >= chunks.length) return chunks;
-          const next = [...chunks];
-          [next[idx], next[target]] = [next[target], next[idx]];
-          return reindex(next);
-        })
+      commit(
+        (doc) =>
+          mapChunks(doc, (chunks) => {
+            const idx = chunks.findIndex((c) => c.id === id);
+            const target = idx + dir;
+            if (idx < 0 || target < 0 || target >= chunks.length) return chunks;
+            const next = [...chunks];
+            [next[idx], next[target]] = [next[target], next[idx]];
+            return reindex(next);
+          }),
+        { marksStale: false } // a reorder leaves id-based relationships intact (A3)
       ),
 
     setFocused: (id) => set({ focusedChunkId: id }),
@@ -815,17 +1085,37 @@ export const useStore = create<AppState & AppActions>((set, get) => {
           : [...s.selectedChunkIds, id],
       })),
     clearSelection: () => set({ selectedChunkIds: [] }),
-    setBusyChunk: (id, busy) =>
-      set((s) => {
-        const busyChunks = { ...s.busyChunks };
-        if (busy) busyChunks[id] = true;
-        else delete busyChunks[id];
-        return { busyChunks };
+    setBusyChunk: (id, busy, tabId) => {
+      const t = tabId ?? get().activeTabId;
+      const s = get();
+      const cur = t === s.activeTabId ? s.busyChunks : s.inactiveTabs[t]?.busyChunks ?? {};
+      const busyChunks = { ...cur };
+      if (busy) busyChunks[id] = true;
+      else delete busyChunks[id];
+      routeTabPatch(t, { busyChunks });
+    },
+    setGlobalBusy: (label, tabId) =>
+      routeTabPatch(tabId ?? get().activeTabId, { globalBusy: label }),
+    beginChunkStream: (id, tabId) =>
+      routeTabPatch(tabId ?? get().activeTabId, { streamingChunkId: id, streamingText: "" }),
+    updateChunkStream: (text, tabId) =>
+      routeTabPatch(tabId ?? get().activeTabId, { streamingText: text }),
+    endChunkStream: (tabId) =>
+      routeTabPatch(tabId ?? get().activeTabId, {
+        streamingChunkId: null,
+        streamingText: "",
       }),
-    setGlobalBusy: (label) => set({ globalBusy: label }),
-    beginChunkStream: (id) => set({ streamingChunkId: id, streamingText: "" }),
-    updateChunkStream: (text) => set({ streamingText: text }),
-    endChunkStream: () => set({ streamingChunkId: null, streamingText: "" }),
+
+    // Read-aloud (UI3): a single global "currently speaking" chunk + the backend
+    // utterance id, so a `speech-done` for an older utterance can't clear a newer
+    // one (and finishing/stopping one chunk never affects another).
+    beginSpeaking: (chunkId, utterance) =>
+      set({ speakingChunkId: chunkId, speakingUtterance: utterance }),
+    endSpeaking: (utterance) =>
+      set((s) => {
+        if (utterance !== undefined && s.speakingUtterance !== utterance) return {};
+        return { speakingChunkId: null, speakingUtterance: null };
+      }),
 
     setSettings: (settings) => set({ settings }),
     setHasApiKey: (has) => set({ hasApiKey: has }),
@@ -883,8 +1173,12 @@ export const useStore = create<AppState & AppActions>((set, get) => {
           // (single source of truth; also keep linkedChunks for the §5 model).
           doc: { ...state.doc, chunks, analysis: result },
           analysis: result,
+          // Snapshot so Analyze is a discrete, undoable step (B4)…
+          past: [...state.past, state.doc].slice(-MAX_HISTORY),
           dirty: true,
           future: [],
+          // …and the freshly-built graph matches the document (A3).
+          analysisStale: false,
         };
       }),
 
@@ -910,6 +1204,11 @@ export const useStore = create<AppState & AppActions>((set, get) => {
           future: [state.doc, ...state.future].slice(0, MAX_HISTORY),
           dirty: true,
           lastEditChunkId: null,
+          // Re-derive the graph for the restored doc so NetworkPanel + the saved
+          // .aix don't keep showing the pre-undo relationships (B4); recompute the
+          // staleness badge for the restored structure (A3).
+          analysis: previous.analysis ?? rebuildAnalysis(previous),
+          analysisStale: structurallyStale(previous),
         };
       }),
 
@@ -923,6 +1222,8 @@ export const useStore = create<AppState & AppActions>((set, get) => {
           future: rest,
           dirty: true,
           lastEditChunkId: null,
+          analysis: next.analysis ?? rebuildAnalysis(next),
+          analysisStale: structurallyStale(next),
         };
       }),
 

@@ -13,7 +13,7 @@
 # sign + notarize the build, or users must run:
 #   xattr -dr com.apple.quarantine "/Applications/aixTextEditor.app"
 cask "aix-text-editor" do
-  version "1.1.0"
+  version "1.2.0"
   sha256 :no_check # replace with the real sha256 of the released .dmg
 
   url "https://github.com/kumeS/aixTextEditor/releases/download/v#{version}/aixTextEditor_#{version}_aarch64.dmg"

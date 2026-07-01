@@ -160,7 +160,7 @@ export async function bulletizeChunks(ids: string[]): Promise<void> {
     return;
   }
 
-  s.setGlobalBusy("Bulletizing…");
+  s.setGlobalBusy("Bulletizing…", tab);
   try {
     const result = await api.aiProcess({
       action: "custom",
@@ -189,7 +189,63 @@ export async function bulletizeChunks(ids: string[]): Promise<void> {
   } catch (e) {
     s.notify(message(e), "error");
   } finally {
-    useStore.getState().setGlobalBusy(null);
+    useStore.getState().setGlobalBusy(null, tab);
+  }
+}
+
+/**
+ * Slide AI (Req 2): summarise a slide's linked text into concise bullets and
+ * store them as the slide's `slideBody` — "detaching" it from the prose. The
+ * editor text is left untouched; the slide now shows this custom summary until
+ * re-linked. `leadId` is the slide's lead chunk (heading, else first chunk).
+ */
+export async function summarizeSlide(textIds: string[], leadId: string): Promise<void> {
+  const s = useStore.getState();
+  if (!leadId) return;
+  if (!aiReady()) {
+    s.notify("Set your OpenRouter API key in Settings first.", "error");
+    s.openSettings();
+    return;
+  }
+  const idSet = new Set(textIds);
+  const texts = s.doc.chunks
+    .filter((c) => idSet.has(c.id) && c.metadata.chunkType === "text" && c.content.trim())
+    .map((c) => c.content.trim());
+  if (!texts.length) {
+    s.notify("This slide has no text to summarize.", "info");
+    return;
+  }
+  const tab = s.activeTabId;
+  s.setGlobalBusy("Summarizing slide…", tab);
+  try {
+    const result = await api.aiProcess({
+      action: "custom",
+      text: texts.join("\n\n"),
+      instruction:
+        "Summarize the text into 3 to 6 concise presentation bullet points. Output ONLY the " +
+        "bullets, one per line, each starting with '- '. Short phrases (not full sentences). " +
+        "Keep the meaning faithful; do not invent facts. No title, no preamble.",
+      outputLanguage: s.settings?.defaultTargetLanguage,
+      tone: s.settings?.writingTone || undefined,
+    });
+    if (useStore.getState().activeTabId !== tab) {
+      s.notify("Switched tabs — summary discarded.", "info");
+      return;
+    }
+    const lines = result
+      .split("\n")
+      .map((l) => l.replace(/^\s*[-•*]\s*/, "").trim())
+      .filter(Boolean);
+    if (!lines.length) {
+      s.notify("The model returned no summary.", "info");
+      return;
+    }
+    useStore.getState().setSlideBody(leadId, lines);
+    s.notify(`Slide summarized into ${lines.length} points — detached from the text.`, "success");
+  } catch (e) {
+    s.notify(message(e), "error");
+  } finally {
+    useStore.getState().setGlobalBusy(null, tab);
   }
 }
 
@@ -235,8 +291,8 @@ export async function runChunkAction(
 
   // Stream every action except "summarize" (which writes metadata, not content).
   const streaming = action !== "summarize";
-  s.setBusyChunk(chunkId, true);
-  if (streaming) useStore.getState().beginChunkStream(chunkId);
+  s.setBusyChunk(chunkId, true, tab);
+  if (streaming) useStore.getState().beginChunkStream(chunkId, tab);
   try {
     const result = streaming
       ? await api.aiProcessStream(request, (text) => {
@@ -268,12 +324,12 @@ export async function runChunkAction(
   } catch (e) {
     s.notify(message(e), "error");
   } finally {
-    // B3: only clear the shared stream state if we still own the active tab,
-    // so finishing a backgrounded op doesn't kill the foreground tab's stream.
-    if (streaming && useStore.getState().activeTabId === tab) {
-      useStore.getState().endChunkStream();
-    }
-    useStore.getState().setBusyChunk(chunkId, false);
+    // B3: clear the stream + busy state on the tab that OWNED this op, whatever
+    // tab is active now — routeTabPatch updates the originating tab's snapshot
+    // when it's backgrounded, so neither a stuck spinner nor a cleared
+    // foreground stream can result.
+    if (streaming) useStore.getState().endChunkStream(tab);
+    useStore.getState().setBusyChunk(chunkId, false, tab);
   }
 }
 
@@ -283,6 +339,7 @@ export async function generateDiagramFromChunk(
   instruction?: string
 ): Promise<void> {
   const s = useStore.getState();
+  const tab = s.activeTabId; // B3: keep the chunk's busy state on its own tab
   const chunk = s.doc.chunks.find((c) => c.id === chunkId);
   if (!chunk || !chunk.content.trim()) {
     s.notify("This paragraph is empty.", "info");
@@ -294,7 +351,7 @@ export async function generateDiagramFromChunk(
     return;
   }
 
-  s.setBusyChunk(chunkId, true);
+  s.setBusyChunk(chunkId, true, tab);
   try {
     const code = await api.aiGenerateDiagram(chunk.content, instruction);
     if (!chunkStillActive(chunkId)) {
@@ -306,13 +363,14 @@ export async function generateDiagramFromChunk(
   } catch (e) {
     s.notify(message(e), "error");
   } finally {
-    useStore.getState().setBusyChunk(chunkId, false);
+    useStore.getState().setBusyChunk(chunkId, false, tab);
   }
 }
 
 /** Generate an image from one paragraph and insert it as an image chunk below. */
 export async function generateImageFromChunk(chunkId: string): Promise<void> {
   const s = useStore.getState();
+  const tab = s.activeTabId; // B3: keep the chunk's busy state on its own tab
   const chunk = s.doc.chunks.find((c) => c.id === chunkId);
   if (!chunk || !chunk.content.trim()) {
     s.notify("This paragraph is empty.", "info");
@@ -323,7 +381,7 @@ export async function generateImageFromChunk(chunkId: string): Promise<void> {
     s.openSettings();
     return;
   }
-  s.setBusyChunk(chunkId, true);
+  s.setBusyChunk(chunkId, true, tab);
   try {
     const url = await api.aiGenerateImage(chunk.content);
     if (!chunkStillActive(chunkId)) {
@@ -335,7 +393,7 @@ export async function generateImageFromChunk(chunkId: string): Promise<void> {
   } catch (e) {
     s.notify(message(e), "error");
   } finally {
-    useStore.getState().setBusyChunk(chunkId, false);
+    useStore.getState().setBusyChunk(chunkId, false, tab);
   }
 }
 
@@ -364,7 +422,7 @@ export async function generateImageFromSelection(): Promise<void> {
   }
   const insertAfterId = selectedInOrder[selectedInOrder.length - 1]?.id ?? null;
   const tab = s.activeTabId;
-  s.setGlobalBusy("Generating image…");
+  s.setGlobalBusy("Generating image…", tab);
   try {
     const url = await api.aiGenerateImage(prompt);
     if (useStore.getState().activeTabId !== tab) {
@@ -377,7 +435,7 @@ export async function generateImageFromSelection(): Promise<void> {
   } catch (e) {
     s.notify(message(e), "error");
   } finally {
-    useStore.getState().setGlobalBusy(null);
+    useStore.getState().setGlobalBusy(null, tab);
   }
 }
 
@@ -398,6 +456,7 @@ function presentationPrompt(text: string): string {
  */
 export async function generatePresentationFromChunk(chunkId: string): Promise<void> {
   const s = useStore.getState();
+  const tab = s.activeTabId; // B3: keep the chunk's busy state on its own tab
   const chunk = s.doc.chunks.find((c) => c.id === chunkId);
   if (!chunk || !chunk.content.trim()) {
     s.notify("This paragraph is empty.", "info");
@@ -409,7 +468,7 @@ export async function generatePresentationFromChunk(chunkId: string): Promise<vo
     return;
   }
   const prompt = presentationPrompt(chunk.content);
-  s.setBusyChunk(chunkId, true);
+  s.setBusyChunk(chunkId, true, tab);
   try {
     const url = await api.aiGenerateImage(prompt);
     if (!chunkStillActive(chunkId)) {
@@ -421,7 +480,7 @@ export async function generatePresentationFromChunk(chunkId: string): Promise<vo
   } catch (e) {
     s.notify(message(e), "error");
   } finally {
-    useStore.getState().setBusyChunk(chunkId, false);
+    useStore.getState().setBusyChunk(chunkId, false, tab);
   }
 }
 
@@ -431,6 +490,7 @@ export async function generatePresentationFromChunk(chunkId: string): Promise<vo
  */
 export async function regenerateImageChunk(chunkId: string): Promise<void> {
   const s = useStore.getState();
+  const tab = s.activeTabId; // B3: keep the chunk's busy state on its own tab
   const chunk = s.doc.chunks.find((c) => c.id === chunkId);
   if (!chunk || chunk.metadata.chunkType !== "image") return;
   const prompt = chunk.metadata.imagePrompt || chunk.metadata.summary || "";
@@ -443,7 +503,7 @@ export async function regenerateImageChunk(chunkId: string): Promise<void> {
     s.openSettings();
     return;
   }
-  s.setBusyChunk(chunkId, true);
+  s.setBusyChunk(chunkId, true, tab);
   try {
     const url = await api.aiGenerateImage(prompt);
     if (!chunkStillActive(chunkId)) {
@@ -457,7 +517,7 @@ export async function regenerateImageChunk(chunkId: string): Promise<void> {
   } catch (e) {
     s.notify(message(e), "error");
   } finally {
-    useStore.getState().setBusyChunk(chunkId, false);
+    useStore.getState().setBusyChunk(chunkId, false, tab);
   }
 }
 
@@ -489,21 +549,21 @@ export async function editSelection(instruction: string): Promise<void> {
     return;
   }
   const tab = s.activeTabId;
-  s.setGlobalBusy(`Editing ${ordered.length} paragraphs…`);
+  s.setGlobalBusy(`Editing ${ordered.length} paragraphs…`, tab);
   let done = 0;
   try {
     for (const c of ordered) {
       if (useStore.getState().activeTabId !== tab) break;
       await runChunkAction(c.id, "custom", { instruction: text });
       done += 1;
-      useStore.getState().setGlobalBusy(`Editing ${done}/${ordered.length}…`);
+      useStore.getState().setGlobalBusy(`Editing ${done}/${ordered.length}…`, tab);
     }
     if (useStore.getState().activeTabId === tab) {
       useStore.getState().clearSelection();
       s.notify(`Edited ${done} paragraph${done === 1 ? "" : "s"}.`, "success");
     }
   } finally {
-    useStore.getState().setGlobalBusy(null);
+    useStore.getState().setGlobalBusy(null, tab);
   }
 }
 
@@ -528,13 +588,17 @@ export async function speakChunk(chunkId: string): Promise<void> {
     return;
   }
   try {
-    await api.speakText(chunk.content, voiceForText(chunk.content));
+    // The backend returns an utterance id and emits `speech-done` with that id
+    // when playback ends; record it so exactly this chunk's button clears (UI3).
+    const utterance = await api.speakText(chunk.content, voiceForText(chunk.content));
+    useStore.getState().beginSpeaking(chunkId, utterance);
   } catch (e) {
     s.notify(message(e), "error");
   }
 }
 
 export async function stopSpeaking(): Promise<void> {
+  useStore.getState().endSpeaking(); // clear the speaking indicator immediately
   try {
     await api.stopSpeaking();
   } catch {
@@ -545,13 +609,17 @@ export async function stopSpeaking(): Promise<void> {
 /** Analyze the whole document and open the relationship network panel. */
 export async function analyzeDocument(): Promise<void> {
   const s = useStore.getState();
+  // UI2: guard against concurrent Analyze runs. This covers EVERY entry point
+  // (toolbar, native menu, NetworkPanel refresh, shortcut) so rapid clicks can't
+  // start parallel analyses that waste tokens and flicker the graph.
+  if (s.globalBusy) return;
   if (!aiReady()) {
     s.notify("Set your OpenRouter API key in Settings first.", "error");
     s.openSettings();
     return;
   }
   const tab = s.activeTabId;
-  s.setGlobalBusy("Analyzing document…");
+  s.setGlobalBusy("Analyzing document…", tab);
   try {
     const result = await api.aiAnalyzeDocument(s.doc);
     if (useStore.getState().activeTabId !== tab) {
@@ -573,6 +641,6 @@ export async function analyzeDocument(): Promise<void> {
   } catch (e) {
     s.notify(message(e), "error");
   } finally {
-    useStore.getState().setGlobalBusy(null);
+    useStore.getState().setGlobalBusy(null, tab);
   }
 }
