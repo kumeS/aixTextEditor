@@ -27,8 +27,7 @@ lerna-debug.log*
 # ── OS / editor cruft ────────────────────────────────────────
 .DS_Store
 *.local
-.vscode/*
-!.vscode/extensions.json
+.vscode/
 .idea/
 *.suo
 *.ntvs*
