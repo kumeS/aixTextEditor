@@ -51,8 +51,11 @@ pub struct ChunkMetadata {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub content_history: Vec<String>,
     /// For a chunk that begins a slide: an explicit slide-layout override
-    /// ("section" | "title-content" | "title-image"). When absent, the layout is
-    /// auto-picked from the slide's content (see `deck.rs`).
+    /// ("section" | "title-content" | "title-image" | "title-image-left" |
+    /// "image-top"). When absent, the layout is auto-picked from the slide's
+    /// content (see `deck.rs`) — auto-pick only ever produces "section",
+    /// "title-content" or "title-image"; the left/top image variants are
+    /// manual-choice only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout: Option<String>,
     /// A text chunk marked as a subtitle (secondary title line, Req 3). In slide
@@ -251,6 +254,8 @@ impl Document {
             SLIDE_LAYOUT_SECTION,
             SLIDE_LAYOUT_TITLE_CONTENT,
             SLIDE_LAYOUT_TITLE_IMAGE,
+            SLIDE_LAYOUT_TITLE_IMAGE_LEFT,
+            SLIDE_LAYOUT_IMAGE_TOP,
         ];
         let mut coerced_types = 0usize;
         let mut clamped_levels = 0usize;
@@ -336,6 +341,8 @@ impl Document {
 pub const SLIDE_LAYOUT_SECTION: &str = "section";
 pub const SLIDE_LAYOUT_TITLE_CONTENT: &str = "title-content";
 pub const SLIDE_LAYOUT_TITLE_IMAGE: &str = "title-image";
+pub const SLIDE_LAYOUT_TITLE_IMAGE_LEFT: &str = "title-image-left";
+pub const SLIDE_LAYOUT_IMAGE_TOP: &str = "image-top";
 
 fn default_layout() -> String {
     SLIDE_LAYOUT_TITLE_CONTENT.to_string()
@@ -346,7 +353,8 @@ fn default_layout() -> String {
 pub struct Slide {
     pub id: String,
     pub order: u32,
-    /// "section" | "title-content" | "title-image".
+    /// "section" | "title-content" | "title-image" | "title-image-left" |
+    /// "image-top".
     #[serde(default = "default_layout")]
     pub layout: String,
     /// Reused editor chunks: heading = title, text = bullets, image, diagram.
